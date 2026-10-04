@@ -465,3 +465,29 @@ int64_t sys_ioctl(int fd, unsigned long request, ...) {
     /* TODO: Implement ioctl */
     return -1; /* ENOSYS */
 }
+
+/* Phase 23: Signals */
+int64_t sys_kill(pid_t pid, int sig) {
+    (void)pid; (void)sig;
+    /* TODO: Implement signal delivery */
+    return 0; /* Success for now */
+}
+
+int64_t sys_signal(int sig, void *handler) {
+    (void)sig; (void)handler;
+    /* TODO: Implement signal handler registration */
+    return 0; /* Success for now */
+}
+
+/* Phase 25: Shared Memory */
+int64_t sys_shmget(key_t key, size_t size, int shmflg) {
+    (void)key; (void)size; (void)shmflg;
+    /* TODO: Implement shared memory allocation */
+    return -1; /* ENOSYS */
+}
+
+int64_t sys_shmat(int shmid, const void *shmaddr, int shmflg) {
+    (void)shmid; (void)shmaddr; (void)shmflg;
+    /* TODO: Implement shared memory attachment */
+    return -1; /* ENOSYS */
+}

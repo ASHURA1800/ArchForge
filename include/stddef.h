@@ -5,6 +5,7 @@
 
 typedef uint64_t size_t;
 typedef int64_t  ptrdiff_t;
+typedef int32_t  key_t;
 
 #define NULL ((void *)0)
 

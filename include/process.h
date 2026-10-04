@@ -13,6 +13,17 @@ typedef enum {
     PROCESS_STATE_ZOMBIE
 } process_state_t;
 
+/* File descriptor table constants */
+#define MAX_FDS 16
+
+/* File descriptor entry */
+typedef struct {
+    void *node;      /* vfs_node_t* */
+    size_t offset;
+    int flags;
+    int in_use;
+} fd_entry_t;
+
 /* Process Control Block (PCB) */
 typedef struct process {
     uint64_t pid;
@@ -54,17 +65,6 @@ typedef struct process {
 
 /* Maximum number of processes */
 #define MAX_PROCESSES 64
-
-/* Maximum file descriptors per process */
-#define MAX_FDS 16
-
-/* File descriptor entry */
-typedef struct {
-    void *node;      /* vfs_node_t* */
-    size_t offset;
-    int flags;
-    int in_use;
-} fd_entry_t;
 
 /* Time slice for round-robin (ms) */
 #define PROCESS_TIME_SLICE 10

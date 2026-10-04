@@ -79,26 +79,13 @@ process_t *process_create(void (*entry)(void), void *arg) {
     }
     
     /* Zero it */
-    uint64_t *pml4_virt = (uint64_t *)((uint64_t)proc->pml4 + /* hhdm_offset would be needed, but pmm_alloc returns phys */ 0);
-    /* Wait, pmm_alloc returns physical address. We need to map it or use HHDM. */
-    /* Let's assume hhdm_offset is accessible or we map it. For simplicity, let's use a global hhdm_offset or just cast. */
-    /* Actually, vmm.c has hhdm_offset as static. Let's add a helper or just use the fact that we can allocate via kmalloc for PML4? */
-    /* No, PML4 must be physically contiguous and page-aligned. pmm_alloc(1) returns physical. */
-    /* Let's add a global hhdm_offset accessor or just do it in vmm.c. */
-    /* For now, let's use a trick: we know hhdm_offset is typically 0xffff800000000000. */
-    /* Better: let's add `void *pmm_alloc_virt(size_t pages)` to pmm.h, or just use the existing pmm_alloc and add hhdm_offset. */
-    /* Let's just use kmalloc for PML4, it's 4KB, kmalloc can return page-aligned if we ask for 4096. */
-    /* Actually, let's just use pmm_alloc and add the hhdm_offset manually. We'll define HHDM_OFFSET in vmm.h or pass it. */
-    /* Let's just use a global variable in vmm.c and expose it, or hardcode 0xffff800000000000ULL which is standard for Limine. */
     #define HHDM_OFFSET 0xffff800000000000ULL
-    
     uint64_t *pml4_virt_ptr = (uint64_t *)((uint64_t)proc->pml4 + HHDM_OFFSET);
     for (int i = 0; i < 512; i++) {
         pml4_virt_ptr[i] = 0;
     }
     
     /* Clone kernel space from current (or initial) PML4 */
-    /* We need the initial PML4. Let's assume kernel_pml4 is the initial one. */
     extern uint64_t *initial_pml4;
     vmm_clone_user_space(initial_pml4, pml4_virt_ptr);
     
@@ -116,7 +103,7 @@ process_t *process_create(void (*entry)(void), void *arg) {
     proc->time_slice = PROCESS_TIME_SLICE;
     proc->parent = current_process;
     proc->next = NULL;
-
+    
     /* Initialize file descriptor table */
     for (int i = 0; i < MAX_FDS; i++) {
         proc->fd_table[i].in_use = 0;
@@ -125,9 +112,9 @@ process_t *process_create(void (*entry)(void), void *arg) {
         proc->fd_table[i].flags = 0;
     }
     /* Mark 0, 1, 2 as in use for standard I/O */
-    proc->fd_table[0].in_use = 1;
-    proc->fd_table[1].in_use = 1;
-    proc->fd_table[2].in_use = 1;
+    proc->fd_table[0].in_use = 1;  /* stdin - keyboard */
+    proc->fd_table[1].in_use = 1;  /* stdout - serial/console */
+    proc->fd_table[2].in_use = 1;  /* stderr - serial/console */
     
     uint64_t stack_top = (uint64_t)proc->stack + proc->stack_size;
     stack_top &= ~0xF;

@@ -27,8 +27,12 @@ typedef int32_t pid_t;
 #define SYS_IOCTL     15
 #define SYS_DUP2      16
 #define SYS_PIPE      17
+#define SYS_KILL      18
+#define SYS_SIGNAL    19
+#define SYS_SHMGET    20
+#define SYS_SHMAT     21
 
-#define MAX_SYSCALLS 18
+#define MAX_SYSCALLS 22
 
 /* Syscall register structure (matches interrupt frame) */
 struct syscall_frame {

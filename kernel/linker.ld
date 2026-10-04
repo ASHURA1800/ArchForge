@@ -44,18 +44,18 @@ SECTIONS
         *(.rodata .rodata.*)
     } :rodata
 
+    /* Embedded user programs - put them in .data section */
+    .data : {
+        *(.data .data.*)
+        *(.data.user_hello)
+        *(.data.user_cat)
+    } :data
+
     /* Add a .note.gnu.build-id output section in case a build ID flag is added to the */
     /* linker command. */
     .note.gnu.build-id : {
         *(.note.gnu.build-id)
     } :rodata
-
-    /* Move to the next memory page for .data */
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
-
-    .data : {
-        *(.data .data.*)
-    } :data
 
     /* NOTE: .bss needs to be the last thing mapped to :data, otherwise lots of */
     /* unnecessary zeros will be written to the binary. */

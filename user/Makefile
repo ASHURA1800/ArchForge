@@ -1,28 +1,40 @@
-# ArchForge OS User Programs Makefile
+# User-space programs Makefile
 
-CC = x86_64-elf-gcc
-LD = x86_64-elf-ld
-CFLAGS = -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone -mno-sse -O2 -Wall -Wextra
-LDFLAGS = -T user.ld -nostdlib
+CC = clang
+LD = ld.lld
 
-.PHONY: all clean
+CFLAGS = -target x86_64-elf -ffreestanding -fno-stack-protector -fno-pie -fno-pic \
+         -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -mcmodel=small -Wall -Wextra \
+         -I../include -O2
 
-all: hello.elf cat.elf
+LDFLAGS = -nostdlib -T user.ld -z max-page-size=0x1000
+
+USER_PROGS = hello.elf cat.elf init.elf ls.elf cp.elf
+
+all: $(USER_PROGS)
+
+libc.o: libc.c libc.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 hello.elf: hello.o
 	$(LD) $(LDFLAGS) -o $@ $^
 
-hello.o: hello.c
-	$(CC) $(CFLAGS) -c -o $@ $<
-
 cat.elf: cat.o libc.o
 	$(LD) $(LDFLAGS) -o $@ $^
 
-cat.o: cat.c libc.h
-	$(CC) $(CFLAGS) -c -o $@ $<
+init.elf: init.o libc.o
+	$(LD) $(LDFLAGS) -o $@ $^
 
-libc.o: libc.c libc.h
-	$(CC) $(CFLAGS) -c -o $@ $<
+ls.elf: ls.o libc.o
+	$(LD) $(LDFLAGS) -o $@ $^
+
+cp.elf: cp.o libc.o
+	$(LD) $(LDFLAGS) -o $@ $^
 
 clean:
 	rm -f *.o *.elf
+
+.PHONY: all clean

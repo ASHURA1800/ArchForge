@@ -1,25 +1,28 @@
+/* user/cat.c — Simple cat utility for ArchForge OS
+ * 
+ * Usage: cat <file>
+ * Reads and prints file contents to stdout.
+ */
 #include "libc.h"
 
+/* Entry point for user programs */
 void _start(void) {
-    printf("Cat utility starting...\n");
+    /* We can't easily get argc/argv without kernel support, so for now
+     * we'll hardcode the test file path */
+    const char *path = "/test.txt";
     
-    const char *filename = "/test.txt";
-    int fd = open(filename, 0);
+    int fd = open(path, O_RDONLY);
     if (fd < 0) {
-        printf("Failed to open %s (fd=%d)\n", filename, fd);
+        printf("cat: cannot open '%s': No such file or directory\n", path);
         exit(1);
     }
     
-    printf("Opened %s, fd=%d\n", filename, fd);
-    
     char buf[256];
     int bytes_read;
-    while ((bytes_read = read(fd, buf, sizeof(buf) - 1)) > 0) {
-        buf[bytes_read] = '\0';
+    while ((bytes_read = read(fd, buf, sizeof(buf))) > 0) {
         write(1, buf, bytes_read);
     }
     
-    printf("\n--- End of file ---\n");
     close(fd);
     exit(0);
 }

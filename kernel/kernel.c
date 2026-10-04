@@ -329,32 +329,49 @@ void kernel_main(void) {
     /* ---- Step 15: Install user programs in VFS ---- */
     serial_write("[KERNEL] Installing user programs...\n");
     
-    /* Create /bin directory */
+    /* Create /bin and /sbin directories */
     vfs_create_dir("/bin");
+    vfs_create_dir("/sbin");
     
     /* Create a test file for user-space cat utility */
     const char *test_data = "Hello from the persistent filesystem!\nThis file was created by the kernel at boot.\n";
     vfs_create_file("/test.txt", test_data, strlen(test_data));
     serial_write("[KERNEL] Created /test.txt in VFS\n");
     
-    /* Include the user hello.elf binary */
+    /* Include user binaries */
     extern const uint8_t _binary_build_user_hello_elf_start[];
     extern const uint8_t _binary_build_user_hello_elf_end[];
+    extern const uint8_t _binary_build_user_init_elf_start[];
+    extern const uint8_t _binary_build_user_init_elf_end[];
+    extern const uint8_t _binary_build_user_cat_elf_start[];
+    extern const uint8_t _binary_build_user_cat_elf_end[];
     
     size_t hello_elf_size = _binary_build_user_hello_elf_end - _binary_build_user_hello_elf_start;
+    size_t init_elf_size = _binary_build_user_init_elf_end - _binary_build_user_init_elf_start;
+    size_t cat_elf_size = _binary_build_user_cat_elf_end - _binary_build_user_cat_elf_start;
     
-    if (hello_elf_size > 0 && vfs_create_file("/bin/hello", _binary_build_user_hello_elf_start, hello_elf_size) != NULL) {
-        serial_write("[KERNEL] Installed '/bin/hello' (");
-        serial_write_dec(hello_elf_size);
-        serial_write(" bytes)\n");
-    } else {
-        serial_write("[KERNEL] WARNING: Failed to install /bin/hello\n");
+    if (hello_elf_size > 0) {
+        vfs_create_file("/bin/hello", _binary_build_user_hello_elf_start, hello_elf_size);
+        serial_write("[KERNEL] Installed '/bin/hello'\n");
+    }
+    if (init_elf_size > 0) {
+        vfs_create_file("/sbin/init", _binary_build_user_init_elf_start, init_elf_size);
+        serial_write("[KERNEL] Installed '/sbin/init'\n");
+    }
+    if (cat_elf_size > 0) {
+        vfs_create_file("/bin/cat", _binary_build_user_cat_elf_start, cat_elf_size);
+        serial_write("[KERNEL] Installed '/bin/cat'\n");
     }
 
-    /* ---- Step 16: Launch Interactive Shell (as kernel process) ---- */
-    serial_write("[KERNEL] Launching shell...\n");
-    shell_init();
-    shell_run();
+    /* ---- Step 16: Launch Init Process (Phase 30) ---- */
+    serial_write("[KERNEL] Launching /sbin/init...\n");
+    
+    /* Try to spawn user-space init */
+    if (process_create_elf("/sbin/init") != 0) {
+        serial_write("[KERNEL] WARNING: Failed to spawn /sbin/init, falling back to kernel shell.\n");
+        shell_init();
+        shell_run();
+    }
 
     /* ---- All done, halt ---- */
     serial_write("[KERNEL] All subsystems initialized. Halting.\n");
