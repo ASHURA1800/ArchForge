@@ -76,4 +76,7 @@ int fat32_read_file(fat32_fs_t *fs, uint32_t cluster, void *buffer, size_t size,
 /* Read directory entries */
 int fat32_read_dir(fat32_fs_t *fs, uint32_t cluster, void *buffer, size_t max_entries);
 
+/* Convert FAT name to standard string */
+void fat32_format_name(const uint8_t *fat_name, char *out);
+
 #endif

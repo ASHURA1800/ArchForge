@@ -140,9 +140,35 @@ case "$1" in
         fi
         ;;
     
+    gfx)
+        echo "Running graphics test..."
+        
+        rm -f "$BUILD_DIR/serial.log" "$BUILD_DIR/qemu.log"
+        
+        echo "[TEST] Starting QEMU..."
+        timeout 30 qemu-system-x86_64 -M pc -m 512M -display none -no-reboot -no-shutdown \
+            -serial file:"$BUILD_DIR/serial.log" \
+            -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+            -d guest_errors,cpu_reset -D "$BUILD_DIR/qemu.log" \
+            -cdrom "$BUILD_DIR/archforge.iso" \
+            || true
+            
+        echo "[TEST] QEMU exited. Analyzing graphics results..."
+        
+        if grep -q "\[TEST\] PASS gfx" "$BUILD_DIR/serial.log"; then
+            echo "✅ GRAPHICS TEST PASSED (Guest reported success)"
+            exit 0
+        else
+            echo "❌ GRAPHICS TEST FAILED"
+            echo "Last 50 lines of serial log:"
+            tail -50 "$BUILD_DIR/serial.log"
+            exit 1
+        fi
+        ;;
+    
     all)
         echo "Running all tests..."
-        "$0" smoke && "$0" unit && "$0" persist && "$0" net
+        "$0" smoke && "$0" unit && "$0" persist && "$0" net && "$0" gfx
         ;;
     
     *)

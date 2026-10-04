@@ -10,12 +10,13 @@
 
 /* Helper to read a sector (with partition offset) */
 static int read_sector(fat32_fs_t *fs, uint32_t lba, void *buffer) {
-    return ata_read_sector(lba + fs->partition_lba, (uint8_t *)buffer, 1);
+    /* Use the drive where the partition was found */
+    return ata_read_sector(fs->drive, lba + fs->partition_lba, (uint8_t *)buffer, 1);
 }
 
 /* Helper to write a sector (with partition offset) */
 static int write_sector(fat32_fs_t *fs, uint32_t lba, const void *buffer) {
-    return ata_write_sector(lba + fs->partition_lba, (const uint8_t *)buffer, 1);
+    return ata_write_sector(fs->drive, lba + fs->partition_lba, (const uint8_t *)buffer, 1);
 }
 
 /* Helper to get cluster from directory entry */
@@ -39,7 +40,7 @@ static uint32_t get_next_cluster(fat32_fs_t *fs, uint32_t cluster) {
 }
 
 /* Convert LFN/short name to standard string */
-static void format_fat_name(const uint8_t *fat_name, char *out) {
+void fat32_format_name(const uint8_t *fat_name, char *out) {
     int i, j = 0;
     for (i = 0; i < 8; i++) {
         if (fat_name[i] == ' ') break;
@@ -66,7 +67,7 @@ static void format_fat_name(const uint8_t *fat_name, char *out) {
 int fat32_init(int drive, fat32_fs_t *fs) {
     /* First, read the MBR (LBA 0) to find the FAT32 partition */
     uint8_t mbr[512];
-    if (ata_read_sector(0, mbr, 1) != 0) {
+    if (ata_read_sector(drive, 0, mbr, 1) != 0) {
         return -1;
     }
     

@@ -268,9 +268,11 @@ verify-iso: $(ISO_IMAGE)
 	@readelf -S $(KERNEL_ELF) | grep limine
 
 # ---- Clean ----
-
 clean:
 	rm -rf $(BUILD_DIR)
+	@# Preserve FAT32 test image if it exists
+	@mkdir -p $(BUILD_DIR)
+	@if [ -f fat32_test.img ]; then mv fat32_test.img $(BUILD_DIR)/; fi
 
 # ---- Help ----
 

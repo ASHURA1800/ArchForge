@@ -1,7 +1,9 @@
 #include <pci.h>
 #include <io.h>
 #include <serial.h>
+#include <e1000.h>
 #include <serial.h>
+#include <e1000.h>
 #include <stdint.h>
 
 uint32_t pci_read_config_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {

@@ -27,6 +27,9 @@
 #include "pci.h"
 #include "fat32.h"
 #include "string.h"
+
+/* Forward declaration for G0 test function */
+void gfx_test_g0(void);
 #include "pci.h"
 
 /* ====================================================================
@@ -55,8 +58,15 @@ volatile struct limine_framebuffer_request framebuffer_request = {
 
 /* Memory map — for physical memory manager */
 __attribute__((used, section(".limine_requests")))
-static volatile struct limine_memmap_request memmap_request = {
+volatile struct limine_memmap_request memmap_request = {
     .id = LIMINE_MEMMAP_REQUEST_ID,
+    .revision = 0
+};
+
+/* Executable cmdline — for test mode detection */
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_executable_cmdline_request cmdline_request = {
+    .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
     .revision = 0
 };
 
@@ -143,6 +153,34 @@ void kernel_main(void) {
     serial_write("[BOOT] HHDM offset = ");
     serial_write_hex(hhdm_offset);
     serial_write("\n");
+
+    /* ---- Check for TEST mode EARLY ---- */
+    bool test_mode = false;
+    if (cmdline_request.response != NULL && cmdline_request.response->cmdline != NULL) {
+        serial_write("[DEBUG] Cmdline: ");
+        serial_write(cmdline_request.response->cmdline);
+        serial_write("\n");
+        const char *cmdline = cmdline_request.response->cmdline;
+        const char *needle = "TEST=1";
+        const char *p = cmdline;
+        while (*p) {
+            const char *a = p;
+            const char *b = needle;
+            while (*a && *b && *a == *b) { a++; b++; }
+            if (*b == '\0') {
+                test_mode = true;
+                serial_write("[KERNEL] TEST mode detected.\n");
+                break;
+            }
+            p++;
+        }
+    } else {
+        serial_write("[DEBUG] Cmdline is NULL\n");
+    }
+    if (test_mode) {
+        gfx_test_g0();
+        hcf();
+    }
 
     /* ---- Step 4: Check framebuffer ---- */
     serial_write("[BOOT] Checking framebuffer...\n");
@@ -433,4 +471,44 @@ void kernel_main(void) {
     /* ---- All done, halt ---- */
     serial_write("[KERNEL] All subsystems initialized. Halting.\n");
     hcf();
+}
+/* ==================================================================== 
+ * G0 Test: Graphics Infrastructure
+ * Fills the framebuffer with a solid color and exits via 0xF4.
+ * ==================================================================== */
+void gfx_test_g0(void) {
+    serial_write("[GFX] Running G0 infrastructure test...\n");
+    
+    if (framebuffer_request.response == NULL || framebuffer_request.response->framebuffer_count == 0) {
+        serial_write("[TEST] FAIL gfx: No framebuffer available\n");
+        __asm__ volatile ("outb %0, %1" : : "a"((uint8_t)0x11), "Nd"((uint16_t)0xf4));
+        return;
+    }
+    
+    struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
+    serial_write("[GFX] Framebuffer: ");
+    serial_write_dec(fb->width);
+    serial_write("x");
+    serial_write_dec(fb->height);
+    serial_write(" pitch=");
+    serial_write_dec(fb->pitch);
+    serial_write(" bpp=");
+    serial_write_dec(fb->bpp);
+    serial_write("\n");
+    
+    /* Fill with solid red (R=255, G=0, B=0) */
+    uint32_t *pixels = (uint32_t *)fb->address;
+    uint32_t color = 0x00FF0000; /* Assuming BGRA or ARGB */
+    
+    size_t total_pixels = (fb->pitch / (fb->bpp / 8)) * fb->height;
+    for (size_t i = 0; i < total_pixels; i++) {
+        pixels[i] = color;
+    }
+    
+    serial_write("[GFX] Framebuffer filled with solid color.\n");
+    serial_write("[TEST] PASS gfx\n");
+    serial_write("[TEST] DONE\n");
+    
+    /* Signal success to QEMU via isa-debug-exit */
+    __asm__ volatile ("outb %0, %1" : : "a"((uint8_t)0x10), "Nd"((uint16_t)0xf4));
 }
