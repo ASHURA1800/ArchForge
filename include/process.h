@@ -66,6 +66,12 @@ typedef struct process {
 /* Maximum number of processes */
 #define MAX_PROCESSES 64
 
+/* Wait queue for blocking processes */
+typedef struct wait_queue {
+    process_t *head;
+    process_t *tail;
+} wait_queue_t;
+
 /* Time slice for round-robin (ms) */
 #define PROCESS_TIME_SLICE 10
 
@@ -87,5 +93,9 @@ process_t *process_current(void);
 
 /* Timer callback - called from IRQ0 handler */
 void scheduler_tick(void);
+
+/* Blocking and waking */
+void process_block(wait_queue_t *wq);
+void process_wake_all(wait_queue_t *wq);
 
 #endif

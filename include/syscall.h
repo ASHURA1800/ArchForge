@@ -32,7 +32,18 @@ typedef int32_t pid_t;
 #define SYS_SHMGET    20
 #define SYS_SHMAT     21
 
-#define MAX_SYSCALLS 22
+#define SYS_SOCKET    22
+#define SYS_BIND      23
+#define SYS_LISTEN    24
+#define SYS_ACCEPT    25
+#define SYS_CONNECT   26
+#define SYS_SEND      27
+#define SYS_RECV      28
+#define SYS_SENDTO    29
+#define SYS_RECVFROM  30
+#define SYS_SHUTDOWN  31
+
+#define MAX_SYSCALLS 32
 
 /* Syscall register structure (matches interrupt frame) */
 struct syscall_frame {

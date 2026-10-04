@@ -376,3 +376,52 @@ void process_switch_context(process_t *old, process_t *new) {
     extern void switch_context(process_t *old, process_t *new);
     switch_context(old, new);
 }
+
+/* ====================================================================
+ * process_block — Block current process on a wait queue
+ * ==================================================================== */
+void process_block(wait_queue_t *wq) {
+    if (!current_process) return;
+    
+    current_process->state = PROCESS_STATE_BLOCKED;
+    current_process->next = NULL;
+    
+    if (wq->tail) {
+        wq->tail->next = current_process;
+        wq->tail = current_process;
+    } else {
+        wq->head = current_process;
+        wq->tail = current_process;
+    }
+    
+    /* Force a context switch */
+    scheduler();
+}
+
+/* ====================================================================
+ * process_wake_all — Wake all processes on a wait queue
+ * ==================================================================== */
+void process_wake_all(wait_queue_t *wq) {
+    if (!wq->head) return;
+    
+    process_t *proc = wq->head;
+    while (proc) {
+        process_t *next = proc->next;
+        proc->state = PROCESS_STATE_READY;
+        proc->next = NULL;
+        
+        /* Add to ready list */
+        if (ready_list) {
+            process_t *last = ready_list;
+            while (last->next) last = last->next;
+            last->next = proc;
+        } else {
+            ready_list = proc;
+        }
+        
+        proc = next;
+    }
+    
+    wq->head = NULL;
+    wq->tail = NULL;
+}
