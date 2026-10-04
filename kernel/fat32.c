@@ -10,7 +10,7 @@
 
 /* Helper to read a sector */
 static int read_sector(int drive, uint32_t lba, void *buffer) {
-    return ata_read_sector(drive, lba, buffer);
+    return ata_read_sector(lba, (uint8_t *)buffer, 1);
 }
 
 /* Helper to get cluster from directory entry */

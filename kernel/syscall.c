@@ -19,6 +19,16 @@
 #include "../include/stdint.h"
 #include "../include/string.h"
 
+/* Forward declarations for syscalls defined later */
+int64_t sys_dup2(int oldfd, int newfd);
+int64_t sys_pipe(int *pipefd);
+int64_t sys_stat(const char *path, void *statbuf);
+int64_t sys_lseek(int fd, off_t offset, int whence);
+int64_t sys_ioctl(int fd, unsigned long request, ...);
+int64_t sys_waitpid(pid_t pid, int *status, int options);
+int64_t sys_dup2(int oldfd, int newfd);
+int64_t sys_pipe(int *pipefd);
+
 /* Syscall table */
 static void *syscall_table[MAX_SYSCALLS] = {
     [SYS_EXIT]      = (void *)sys_exit,
@@ -432,4 +442,26 @@ int64_t sys_pipe(int *pipefd) {
     pipefd[1] = fds[1];
     
     return 0;
+}
+
+/* ====================================================================
+ * Stub implementations for unimplemented syscalls
+ * ==================================================================== */
+
+int64_t sys_stat(const char *path, void *statbuf) {
+    (void)path; (void)statbuf;
+    /* TODO: Implement stat */
+    return -1; /* ENOSYS */
+}
+
+int64_t sys_lseek(int fd, off_t offset, int whence) {
+    (void)fd; (void)offset; (void)whence;
+    /* TODO: Implement lseek */
+    return -1; /* ENOSYS */
+}
+
+int64_t sys_ioctl(int fd, unsigned long request, ...) {
+    (void)fd; (void)request;
+    /* TODO: Implement ioctl */
+    return -1; /* ENOSYS */
 }

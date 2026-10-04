@@ -340,9 +340,10 @@ void kernel_main(void) {
     /* Include the user hello.elf binary */
     extern const uint8_t _binary_build_user_hello_elf_start[];
     extern const uint8_t _binary_build_user_hello_elf_end[];
+    
     size_t hello_elf_size = _binary_build_user_hello_elf_end - _binary_build_user_hello_elf_start;
     
-    if (vfs_create_file("/bin/hello", _binary_build_user_hello_elf_start, hello_elf_size) != NULL) {
+    if (hello_elf_size > 0 && vfs_create_file("/bin/hello", _binary_build_user_hello_elf_start, hello_elf_size) != NULL) {
         serial_write("[KERNEL] Installed '/bin/hello' (");
         serial_write_dec(hello_elf_size);
         serial_write(" bytes)\n");
