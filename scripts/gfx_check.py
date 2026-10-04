@@ -1,169 +1,59 @@
 #!/usr/bin/env python3
-"""
-Graphics Check Script for ArchForge OS.
-Parses PPM (P6) files and provides assertions for testing.
-"""
 import sys
-import struct
 import os
 
-def parse_ppm(filename):
-    """Parse a P6 PPM file and return width, height, max_val, and pixel data (bytearray)."""
-    with open(filename, 'rb') as f:
-        # Read magic number
-        magic = f.readline().strip()
-        if magic != b'P6':
+def parse_ppm(filepath):
+    with open(filepath, 'rb') as f:
+        magic = f.readline().decode('ascii').strip()
+        if magic != 'P6':
             raise ValueError(f"Not a P6 PPM file: {magic}")
         
-        # Skip comments and read dimensions
-        line = f.readline()
-        while line.startswith(b'#'):
-            line = f.readline()
-        
-        parts = line.split()
-        if len(parts) >= 2:
-            width = int(parts[0])
-            height = int(parts[1])
-        else:
-            # Might be on separate lines
-            width = int(parts[0])
-            height = int(f.readline().strip())
+        line = f.readline().decode('ascii').strip()
+        while line.startswith('#'):
+            line = f.readline().decode('ascii').strip()
             
-        max_val = int(f.readline().strip())
+        width, height = map(int, line.split())
+        maxval = int(f.readline().decode('ascii').strip())
         
-        # Read pixel data
-        pixel_data = f.read()
+        data = f.read()
+        return width, height, maxval, data
+
+def verify_colors(shots_dir):
+    errors = []
+    for color, expected_r, expected_g, expected_b in [
+        ('red', 255, 0, 0),
+        ('green', 0, 255, 0),
+        ('blue', 0, 0, 255)
+    ]:
+        ppm_path = os.path.join(shots_dir, f"{color}.ppm")
+        if not os.path.exists(ppm_path):
+            errors.append(f"Missing {color}.ppm")
+            continue
+            
+        width, height, maxval, data = parse_ppm(ppm_path)
         
-    return width, height, max_val, bytearray(pixel_data)
-
-def get_pixel(data, width, x, y, bytes_per_pixel=3):
-    """Get the RGB tuple of a pixel at (x, y)."""
-    idx = (y * width + x) * bytes_per_pixel
-    if idx + 2 < len(data):
-        return (data[idx], data[idx+1], data[idx+2])
-    return None
-
-def pixel_equals(data, width, x, y, expected_color, tolerance=0):
-    """Check if pixel at (x, y) matches expected_color (R, G, B) within tolerance."""
-    color = get_pixel(data, width, x, y)
-    if color is None:
-        return False
-    for i in range(3):
-        if abs(color[i] - expected_color[i]) > tolerance:
-            return False
-    return True
-
-def region_is_uniform(data, width, rect, color, tolerance=0):
-    """Check if all pixels in rect (x, y, w, h) match color."""
-    x, y, w, h = rect
-    for cy in range(y, y + h):
-        for cx in range(x, x + w):
-            if not pixel_equals(data, width, cx, cy, color, tolerance):
-                return False
-    return True
-
-def region_not_blank(data, width, rect):
-    """Check if any pixel in rect is not black (0, 0, 0)."""
-    x, y, w, h = rect
-    for cy in range(y, y + h):
-        for cx in range(x, x + w):
-            color = get_pixel(data, width, cx, cy)
-            if color and color != (0, 0, 0):
-                return True
-    return False
-
-def count_pixels(data, width, height, color, tolerance=0):
-    """Count how many pixels match the given color."""
-    count = 0
-    for y in range(height):
-        for x in range(width):
-            if pixel_equals(data, width, x, y, color, tolerance):
-                count += 1
-    return count
-
-def find_color_bbox(data, width, height, color, tolerance=0):
-    """Find the bounding box of all pixels matching the color."""
-    min_x, min_y = width, height
-    max_x, max_y = -1, -1
-    found = False
-    
-    for y in range(height):
-        for x in range(width):
-            if pixel_equals(data, width, x, y, color, tolerance):
-                found = True
-                if x < min_x: min_x = x
-                if x > max_x: max_x = x
-                if y < min_y: min_y = y
-                if y > max_y: max_y = y
+        pixels_to_check = [
+            (0, 0),
+            (width // 2, height // 2),
+            (width - 1, height - 1)
+        ]
+        
+        for x, y in pixels_to_check:
+            idx = (y * width + x) * 3
+            r, g, b = data[idx], data[idx+1], data[idx+2]
+            if r != expected_r or g != expected_g or b != expected_b:
+                errors.append(f"{color}.ppm: pixel ({x},{y}) is ({r},{g},{b}), expected ({expected_r},{expected_g},{expected_b})")
                 
-    if found:
-        return (min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
-    return None
-
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: gfx_check.py <ppm_file> <assertion> [args...]")
-        print("Assertions: pixel <x> <y> <r> <g> <b> [tolerance]")
-        print("            uniform <x> <y> <w> <h> <r> <g> <b> [tolerance]")
-        print("            notblank <x> <y> <w> <h>")
-        print("            count <r> <g> <b> [tolerance]")
+    if errors:
+        print("❌ COLOR VERIFICATION FAILED:")
+        for e in errors:
+            print(f"  - {e}")
         sys.exit(1)
-        
-    filename = sys.argv[1]
-    assertion = sys.argv[2]
-    
-    if not os.path.exists(filename):
-        print(f"FAIL: File not found: {filename}")
-        sys.exit(1)
-        
-    try:
-        width, height, max_val, data = parse_ppm(filename)
-    except Exception as e:
-        print(f"FAIL: Error parsing PPM: {e}")
-        sys.exit(1)
-        
-    if assertion == "pixel":
-        x, y, r, g, b = int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6]), int(sys.argv[7])
-        tol = int(sys.argv[8]) if len(sys.argv) > 8 else 0
-        if pixel_equals(data, width, x, y, (r, g, b), tol):
-            print(f"PASS: pixel({x},{y}) == ({r},{g},{b})")
-            sys.exit(0)
-        else:
-            actual = get_pixel(data, width, x, y)
-            print(f"FAIL: pixel({x},{y}) expected ({r},{g},{b}), got {actual}")
-            sys.exit(1)
-            
-    elif assertion == "uniform":
-        x, y, w, h = int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6])
-        r, g, b = int(sys.argv[7]), int(sys.argv[8]), int(sys.argv[9])
-        tol = int(sys.argv[10]) if len(sys.argv) > 10 else 0
-        if region_is_uniform(data, width, (x, y, w, h), (r, g, b), tol):
-            print(f"PASS: region({x},{y},{w},{h}) is uniform ({r},{g},{b})")
-            sys.exit(0)
-        else:
-            print(f"FAIL: region({x},{y},{w},{h}) is not uniform ({r},{g},{b})")
-            sys.exit(1)
-            
-    elif assertion == "notblank":
-        x, y, w, h = int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6])
-        if region_not_blank(data, width, (x, y, w, h)):
-            print(f"PASS: region({x},{y},{w},{h}) is not blank")
-            sys.exit(0)
-        else:
-            print(f"FAIL: region({x},{y},{w},{h}) is blank")
-            sys.exit(1)
-            
-    elif assertion == "count":
-        r, g, b = int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
-        tol = int(sys.argv[6]) if len(sys.argv) > 6 else 0
-        count = count_pixels(data, width, height, (r, g, b), tol)
-        print(f"PASS: count of ({r},{g},{b}) is {count}")
-        # We just print the count, caller can check it if needed, or we can add expected count
-        sys.exit(0)
-        
     else:
-        print(f"FAIL: Unknown assertion: {assertion}")
-        sys.exit(1)
+        print("✅ COLOR VERIFICATION PASSED")
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 3 or sys.argv[1] != "verify_colors":
+        print("Usage: gfx_check.py verify_colors <shots_dir>")
+        sys.exit(1)
+    verify_colors(sys.argv[2])

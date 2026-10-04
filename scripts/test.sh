@@ -143,27 +143,63 @@ case "$1" in
     gfx)
         echo "Running graphics test..."
         
-        rm -f "$BUILD_DIR/serial.log" "$BUILD_DIR/qemu.log"
+        rm -f "$BUILD_DIR/serial.log" "$BUILD_DIR/qemu.log" "$BUILD_DIR/mon.sock"
+        rm -rf "$BUILD_DIR/shots"
+        mkdir -p "$BUILD_DIR/shots"
         
-        echo "[TEST] Starting QEMU..."
-        timeout 30 qemu-system-x86_64 -M pc -m 512M -display none -no-reboot -no-shutdown \
+        echo "[TEST] Starting QEMU with monitor socket..."
+        timeout 60 qemu-system-x86_64 -M pc -m 512M -display none -no-reboot -no-shutdown \
             -serial file:"$BUILD_DIR/serial.log" \
+            -monitor unix:"$BUILD_DIR/mon.sock",server,nowait \
             -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
             -d guest_errors,cpu_reset -D "$BUILD_DIR/qemu.log" \
-            -cdrom "$BUILD_DIR/archforge.iso" \
-            || true
-            
+            -cdrom "$BUILD_DIR/archforge.iso" &
+        QEMU_PID=$!
+        
+        sleep 2
+        
+        wait_and_dump() {
+            local marker=$1
+            local out_ppm=$2
+            echo "Waiting for marker: $marker"
+            for i in {1..30}; do
+                if grep -q "$marker" "$BUILD_DIR/serial.log"; then
+                    echo "Marker found. Taking screendump..."
+                    python3 "$PROJECT_DIR/scripts/qemu_ctl.py" "$BUILD_DIR/mon.sock" screendump "$out_ppm"
+                    return 0
+                fi
+                sleep 0.5
+            done
+            echo "Timeout waiting for marker: $marker"
+            return 1
+        }
+        
+        wait_and_dump "[GFX] FILL RED" "$BUILD_DIR/shots/red.ppm"
+        wait_and_dump "[GFX] FILL GREEN" "$BUILD_DIR/shots/green.ppm"
+        wait_and_dump "[GFX] FILL BLUE" "$BUILD_DIR/shots/blue.ppm"
+        
+        sleep 2
+        python3 "$PROJECT_DIR/scripts/qemu_ctl.py" "$BUILD_DIR/mon.sock" quit 2>/dev/null || true
+        kill $QEMU_PID 2>/dev/null || true
+        wait $QEMU_PID 2>/dev/null || true
+        
         echo "[TEST] QEMU exited. Analyzing graphics results..."
         
-        if grep -q "\[TEST\] PASS gfx" "$BUILD_DIR/serial.log"; then
-            echo "✅ GRAPHICS TEST PASSED (Guest reported success)"
-            exit 0
-        else
-            echo "❌ GRAPHICS TEST FAILED"
-            echo "Last 50 lines of serial log:"
+        if ! grep -q "\[TEST\] PASS gfx" "$BUILD_DIR/serial.log"; then
+            echo "❌ GRAPHICS TEST FAILED: Guest did not report success"
             tail -50 "$BUILD_DIR/serial.log"
             exit 1
         fi
+        
+        if [ ! -f "$BUILD_DIR/shots/red.ppm" ] || [ ! -f "$BUILD_DIR/shots/green.ppm" ] || [ ! -f "$BUILD_DIR/shots/blue.ppm" ]; then
+            echo "❌ GRAPHICS TEST FAILED: Missing screendumps"
+            exit 1
+        fi
+        
+        python3 "$PROJECT_DIR/scripts/gfx_check.py" verify_colors "$BUILD_DIR/shots"
+        
+        echo "✅ GRAPHICS TEST PASSED"
+        exit 0
         ;;
     
     all)

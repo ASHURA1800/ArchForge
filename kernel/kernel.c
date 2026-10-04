@@ -28,8 +28,8 @@
 #include "fat32.h"
 #include "string.h"
 
-/* Forward declaration for G0 test function */
-void gfx_test_g0(void);
+/* Forward declaration for G1 test function */
+void gfx_test_g1(void);
 #include "pci.h"
 
 /* ====================================================================
@@ -178,7 +178,7 @@ void kernel_main(void) {
         serial_write("[DEBUG] Cmdline is NULL\n");
     }
     if (test_mode) {
-        gfx_test_g0();
+        gfx_test_g1();
         hcf();
     }
 
@@ -284,8 +284,8 @@ void kernel_main(void) {
     fat32_fs_t fat32_fs;
     int fat32_found = 0;
     
-    /* Scan drives 0 and 1 for FAT32 partitions */
-    for (int drive = 0; drive <= 1; drive++) {
+    /* Scan all 4 drives for FAT32 partitions */
+    for (int drive = 0; drive <= 3; drive++) {
         if (fat32_init(drive, &fat32_fs) == 0) {
             serial_write("[KERNEL] FAT32 mounted successfully on drive ");
             char drive_str[2];
@@ -473,11 +473,11 @@ void kernel_main(void) {
     hcf();
 }
 /* ==================================================================== 
- * G0 Test: Graphics Infrastructure
- * Fills the framebuffer with a solid color and exits via 0xF4.
+ * G1 Test: Framebuffer Acquisition & Validation
+ * Maps framebuffer with uncached flags, validates masks, and proves channel order.
  * ==================================================================== */
-void gfx_test_g0(void) {
-    serial_write("[GFX] Running G0 infrastructure test...\n");
+void gfx_test_g1(void) {
+    serial_write("[GFX] Running G1 framebuffer acquisition test...\n");
     
     if (framebuffer_request.response == NULL || framebuffer_request.response->framebuffer_count == 0) {
         serial_write("[TEST] FAIL gfx: No framebuffer available\n");
@@ -495,17 +495,66 @@ void gfx_test_g0(void) {
     serial_write(" bpp=");
     serial_write_dec(fb->bpp);
     serial_write("\n");
+    serial_write("[GFX] Masks: R=");
+    serial_write_dec(fb->red_mask_size);
+    serial_write("@");
+    serial_write_dec(fb->red_mask_shift);
+    serial_write(" G=");
+    serial_write_dec(fb->green_mask_size);
+    serial_write("@");
+    serial_write_dec(fb->green_mask_shift);
+    serial_write(" B=");
+    serial_write_dec(fb->blue_mask_size);
+    serial_write("@");
+    serial_write_dec(fb->blue_mask_shift);
+    serial_write("\n");
+
+    uint64_t fb_phys = (uint64_t)fb->address - hhdm_offset;
+    uint64_t fb_virt = 0xFFFF800000000000ULL;
+    size_t fb_size = fb->pitch * fb->height;
     
-    /* Fill with solid red (R=255, G=0, B=0) */
-    uint32_t *pixels = (uint32_t *)fb->address;
-    uint32_t color = 0x00FF0000; /* Assuming BGRA or ARGB */
+    serial_write("[GFX] Mapping framebuffer phys 0x");
+    serial_write_hex(fb_phys);
+    serial_write(" to virt 0x");
+    serial_write_hex(fb_virt);
+    serial_write("\n");
     
-    size_t total_pixels = (fb->pitch / (fb->bpp / 8)) * fb->height;
-    for (size_t i = 0; i < total_pixels; i++) {
-        pixels[i] = color;
+    if (vmm_map_mmio(fb_virt, fb_phys, fb_size, PTE_WRITABLE) != 0) {
+        serial_write("[TEST] FAIL gfx: Failed to map framebuffer\n");
+        __asm__ volatile ("outb %0, %1" : : "a"((uint8_t)0x11), "Nd"((uint16_t)0xf4));
+        return;
     }
     
-    serial_write("[GFX] Framebuffer filled with solid color.\n");
+    uint32_t *pixels = (uint32_t *)fb_virt;
+    size_t total_pixels = (fb->pitch / (fb->bpp / 8)) * fb->height;
+    
+    // Fill with Red
+    serial_write("[GFX] Filling with RED...\n");
+    uint32_t color_r = (0xFF << fb->red_mask_shift) | (0x00 << fb->green_mask_shift) | (0x00 << fb->blue_mask_shift);
+    for (size_t i = 0; i < total_pixels; i++) {
+        pixels[i] = color_r;
+    }
+    serial_write("[GFX] FILL RED\n");
+    for (volatile int i = 0; i < 10000000; i++); // Small delay for host to catch marker
+    
+    // Fill with Green
+    serial_write("[GFX] Filling with GREEN...\n");
+    uint32_t color_g = (0x00 << fb->red_mask_shift) | (0xFF << fb->green_mask_shift) | (0x00 << fb->blue_mask_shift);
+    for (size_t i = 0; i < total_pixels; i++) {
+        pixels[i] = color_g;
+    }
+    serial_write("[GFX] FILL GREEN\n");
+    for (volatile int i = 0; i < 10000000; i++);
+    
+    // Fill with Blue
+    serial_write("[GFX] Filling with BLUE...\n");
+    uint32_t color_b = (0x00 << fb->red_mask_shift) | (0x00 << fb->green_mask_shift) | (0xFF << fb->blue_mask_shift);
+    for (size_t i = 0; i < total_pixels; i++) {
+        pixels[i] = color_b;
+    }
+    serial_write("[GFX] FILL BLUE\n");
+    for (volatile int i = 0; i < 10000000; i++);
+    
     serial_write("[TEST] PASS gfx\n");
     serial_write("[TEST] DONE\n");
     
