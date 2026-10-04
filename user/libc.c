@@ -71,6 +71,14 @@ int getpid(void) {
     return (int)syscall1(SYS_GETPID, 0);
 }
 
+int dup2(int oldfd, int newfd) {
+    return (int)syscall3(SYS_DUP2, oldfd, newfd, 0);
+}
+
+int pipe(int pipefd[2]) {
+    return (int)syscall1(SYS_PIPE, (int64_t)pipefd);
+}
+
 /* Simple malloc/free using bump allocator */
 void *malloc(size_t size) {
     if (size == 0) return NULL;
@@ -147,16 +155,13 @@ int printf(const char *fmt, ...) {
                             n /= 10;
                         }
                     }
+                    int len = i;
                     if (neg) write(1, "-", 1);
-                    for (int i = 0; i < len; i++) {
-                        // Need to reverse
-                    }
-                    // Actually write in reverse
-                    for (int j = i - 1; j >= 0; j--) {
+                    for (int j = len - 1; j >= 0; j--) {
                         char c = buf[j];
                         write(1, &c, 1);
                     }
-                    written += i + (neg ? 1 : 0);
+                    written += len + (neg ? 1 : 0);
                     break;
                 }
                 case 'x': {

@@ -24,6 +24,7 @@
 #include "vfs.h"
 #include "ata.h"
 #include "pipe.h"
+#include "fat32.h"
 #include "string.h"
 
 /* ====================================================================
@@ -237,14 +238,23 @@ void kernel_main(void) {
     serial_write("[KERNEL] Initializing ATA PIO driver...\n");
     ata_init();
     
-    /* ---- Step 11c: Initialize Pipe Subsystem ---- */
+    /* ---- Step 11c: Initialize FAT32 Filesystem ---- */
+    serial_write("[KERNEL] Initializing FAT32 filesystem...\n");
+    fat32_fs_t fat32_fs;
+    if (fat32_init(0, &fat32_fs) == 0) {
+        serial_write("[KERNEL] FAT32 mounted successfully on drive 0.\n");
+    } else {
+        serial_write("[KERNEL] WARNING: FAT32 initialization failed (no FAT32 drive found).\n");
+    }
+    
+    /* ---- Step 11d: Initialize Pipe Subsystem ---- */
     serial_write("[KERNEL] Initializing Pipe subsystem...\n");
     pipe_init();
     
     /* Test RAM filesystem */
     serial_write("[RAMFS] Testing RAM filesystem...\n");
-    const char *test_data = "Hello from ArchForge RAMFS!";
-    ramfs_create("test.txt", test_data, 25);
+    const char *test_data_ramfs = "Hello from ArchForge RAMFS!\n";
+    ramfs_create("test.txt", test_data_ramfs, 25);
     
     char read_buf[64];
     int bytes_read = ramfs_read("test.txt", read_buf, sizeof(read_buf));

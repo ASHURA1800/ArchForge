@@ -21,6 +21,8 @@
 #define SYS_STAT      13
 #define SYS_LSEEK     14
 #define SYS_IOCTL     15
+#define SYS_DUP2      16
+#define SYS_PIPE      17
 
 /* File descriptor flags */
 #define O_RDONLY  0x0000
@@ -37,6 +39,8 @@ int read(int fd, void *buf, size_t count);
 int open(const char *path, int flags, ...);
 int close(int fd);
 int getpid(void);
+int dup2(int oldfd, int newfd);
+int pipe(int pipefd[2]);
 void *malloc(size_t size);
 void free(void *ptr);
 int printf(const char *fmt, ...);

@@ -14,6 +14,7 @@
 #include "msr.h"
 #include "elf.h"
 #include "vfs.h"
+#include "pipe.h"
 #include "../include/stddef.h"
 #include "../include/stdint.h"
 #include "../include/string.h"
@@ -36,6 +37,8 @@ static void *syscall_table[MAX_SYSCALLS] = {
     [SYS_STAT]      = (void *)sys_stat,
     [SYS_LSEEK]     = (void *)sys_lseek,
     [SYS_IOCTL]     = (void *)sys_ioctl,
+    [SYS_DUP2]      = (void *)sys_dup2,
+    [SYS_PIPE]      = (void *)sys_pipe,
 };
 
 /* MSR addresses for syscall/sysret */
@@ -386,4 +389,47 @@ int64_t sys_close(int fd) {
         return 0;
     }
     return -1; /* EBADF */
+}
+
+int64_t sys_dup2(int oldfd, int newfd) {
+    process_t *proc = process_current();
+    if (!proc) return -1;
+    
+    if (oldfd < 0 || oldfd >= MAX_FDS || newfd < 0 || newfd >= MAX_FDS) {
+        return -1; /* EBADF */
+    }
+    
+    if (!proc->fd_table[oldfd].in_use) {
+        return -1; /* EBADF */
+    }
+    
+    if (oldfd == newfd) {
+        return newfd;
+    }
+    
+    /* If newfd is already open, close it first */
+    if (proc->fd_table[newfd].in_use) {
+        sys_close(newfd);
+    }
+    
+    /* Copy the file descriptor */
+    proc->fd_table[newfd] = proc->fd_table[oldfd];
+    proc->fd_table[newfd].in_use = 1;
+    
+    return newfd;
+}
+
+int64_t sys_pipe(int *pipefd) {
+    int fds[2];
+    if (pipe_create(fds) < 0) {
+        return -1;
+    }
+    
+    /* For simplicity in user-space, we'll just return the raw pipe FDs */
+    /* But we need to make sure they don't conflict with regular FDs */
+    /* pipe_create returns negative FDs, which is fine for our pipe_read/pipe_write */
+    pipefd[0] = fds[0];
+    pipefd[1] = fds[1];
+    
+    return 0;
 }

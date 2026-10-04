@@ -12,6 +12,7 @@
 #include "serial.h"
 #include "ramfs.h"
 #include "heap.h"
+#include "syscall.h"
 #include "../include/string.h"
 #include "../include/stdlib.h"
 
@@ -286,7 +287,7 @@ static int parse_args(char *line, char *argv[], int max_args) {
 }
 
 /* ====================================================================
- * shell_execute — Execute a command line
+ * shell_execute — Execute a command line with advanced features
  * ==================================================================== */
 int shell_execute(const char *cmdline) {
     if (!cmdline || !*cmdline) return 0;
@@ -296,21 +297,183 @@ int shell_execute(const char *cmdline) {
     strncpy(line_copy, cmdline, SHELL_MAX_LINE - 1);
     line_copy[SHELL_MAX_LINE - 1] = '\0';
     
+    /* Check for background execution (&) */
+    int background = 0;
+    size_t len = strlen(line_copy);
+    if (len > 0 && line_copy[len - 1] == '&') {
+        background = 1;
+        line_copy[len - 1] = '\0';
+        /* Trim trailing spaces */
+        while (len > 1 && line_copy[len - 2] == ' ') {
+            line_copy[len - 2] = '\0';
+            len--;
+        }
+    }
+    
+    /* Check for output redirection (>) */
+    char *redirect_file = NULL;
+    char *pipe_char = strchr(line_copy, '|');
+    char *redirect_char = strchr(line_copy, '>');
+    
+    /* Prioritize pipe over redirect if both exist, but handle simple redirect first */
+    if (redirect_char && (!pipe_char || redirect_char < pipe_char)) {
+        *redirect_char = '\0';
+        redirect_file = redirect_char + 1;
+        /* Trim leading spaces from redirect_file */
+        while (*redirect_file == ' ') redirect_file++;
+    }
+    
+    /* Check for pipe (|) */
+    if (pipe_char) {
+        *pipe_char = '\0';
+        char *cmd2 = pipe_char + 1;
+        while (*cmd2 == ' ') cmd2++;
+        
+        /* Create pipe */
+        int pipefd[2];
+        extern int64_t sys_pipe(int *pipefd);
+        if (sys_pipe(pipefd) < 0) {
+            console_write("Failed to create pipe\n");
+            return -1;
+        }
+        
+        /* Fork for first command */
+        extern int64_t sys_fork(void);
+        extern int64_t sys_exec(const char *path, char *const argv[], char *const envp[]);
+        extern int64_t sys_dup2(int oldfd, int newfd);
+        extern int64_t sys_close(int fd);
+        extern int64_t sys_waitpid(int pid, int *status, int options);
+        
+        int pid1 = sys_fork();
+        if (pid1 == 0) {
+            /* Child 1: Writer */
+            sys_dup2(pipefd[1], 1);
+            sys_close(pipefd[0]);
+            sys_close(pipefd[1]);
+            
+            char *argv1[SHELL_MAX_ARGS];
+            int argc1 = parse_args(line_copy, argv1, SHELL_MAX_ARGS);
+            if (argc1 > 0) {
+                shell_cmd_fn fn1 = shell_find_command(argv1[0]);
+                if (fn1) {
+                    fn1(argc1, argv1);
+                    sys_exit(0);
+                }
+                /* If not builtin, try exec */
+                char *exec_argv1[argc1];
+                for (int i = 1; i < argc1; i++) exec_argv1[i-1] = argv1[i];
+                exec_argv1[argc1-1] = NULL;
+                sys_exec(argv1[0], exec_argv1, NULL);
+            }
+            sys_exit(1);
+        }
+        
+        /* Fork for second command */
+        int pid2 = sys_fork();
+        if (pid2 == 0) {
+            /* Child 2: Reader */
+            sys_dup2(pipefd[0], 0);
+            sys_close(pipefd[0]);
+            sys_close(pipefd[1]);
+            
+            char *argv2[SHELL_MAX_ARGS];
+            int argc2 = parse_args(cmd2, argv2, SHELL_MAX_ARGS);
+            if (argc2 > 0) {
+                shell_cmd_fn fn2 = shell_find_command(argv2[0]);
+                if (fn2) {
+                    fn2(argc2, argv2);
+                    sys_exit(0);
+                }
+                char *exec_argv2[argc2];
+                for (int i = 1; i < argc2; i++) exec_argv2[i-1] = argv2[i];
+                exec_argv2[argc2-1] = NULL;
+                sys_exec(argv2[0], exec_argv2, NULL);
+            }
+            sys_exit(1);
+        }
+        
+        /* Parent: close pipe ends and wait */
+        sys_close(pipefd[0]);
+        sys_close(pipefd[1]);
+        
+        int status1, status2;
+        sys_waitpid(pid1, &status1, 0);
+        sys_waitpid(pid2, &status2, 0);
+        return 0;
+    }
+    
+    /* Handle redirection */
+    int redirect_fd = -1;
+    if (redirect_file) {
+        extern int64_t sys_open(const char *path, int flags, ...);
+        redirect_fd = sys_open(redirect_file, 1); /* O_WRONLY = 1 */
+        if (redirect_fd < 0) {
+            console_write("Failed to open ");
+            console_write(redirect_file);
+            console_write(" for writing\n");
+            return -1;
+        }
+    }
+    
     /* Parse arguments */
     char *argv[SHELL_MAX_ARGS];
     int argc = parse_args(line_copy, argv, SHELL_MAX_ARGS);
-    if (argc == 0) return 0;
-    
-    /* Find and execute command */
-    shell_cmd_fn fn = shell_find_command(argv[0]);
-    if (fn) {
-        return fn(argc, argv);
+    if (argc == 0) {
+        if (redirect_fd >= 0) {
+            extern int64_t sys_close(int fd);
+            sys_close(redirect_fd);
+        }
+        return 0;
     }
     
-    console_write("Unknown command: ");
-    console_write(argv[0]);
-    console_write("\nType 'help' for available commands.\n");
-    return -1;
+    /* Fork and execute */
+    extern int64_t sys_fork(void);
+    extern int64_t sys_exec(const char *path, char *const argv[], char *const envp[]);
+    extern int64_t sys_dup2(int oldfd, int newfd);
+    extern int64_t sys_close(int fd);
+    extern int64_t sys_waitpid(int pid, int *status, int options);
+    
+    int pid = sys_fork();
+    if (pid == 0) {
+        /* Child process */
+        if (redirect_fd >= 0) {
+            sys_dup2(redirect_fd, 1);
+            sys_close(redirect_fd);
+        }
+        
+        shell_cmd_fn fn = shell_find_command(argv[0]);
+        if (fn) {
+            fn(argc, argv);
+            sys_exit(0);
+        }
+        
+        /* Try to exec external program */
+        char *exec_argv[argc];
+        for (int i = 1; i < argc; i++) {
+            exec_argv[i-1] = argv[i];
+        }
+        exec_argv[argc-1] = NULL;
+        
+        sys_exec(argv[0], exec_argv, NULL);
+        sys_exit(1);
+    }
+    
+    /* Parent process */
+    if (redirect_fd >= 0) {
+        extern int64_t sys_close(int fd);
+        sys_close(redirect_fd);
+    }
+    
+    if (!background) {
+        int status;
+        sys_waitpid(pid, &status, 0);
+    } else {
+        console_write("[");
+        console_write_dec(pid);
+        console_write("]\n");
+    }
+    
+    return 0;
 }
 
 /* ====================================================================

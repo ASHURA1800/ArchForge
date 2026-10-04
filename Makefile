@@ -59,9 +59,10 @@ $(BUILD_DIR)/user_hello.o: $(BUILD_DIR)/user/hello.elf
 	@mkdir -p $(dir $@)
 	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 $< $@
 
-$(BUILD_DIR)/user_cat.o: $(BUILD_DIR)/user/cat.elf
+$(BUILD_DIR)/user_cat.o: user/cat.elf
 	@mkdir -p $(dir $@)
-	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 $< $@
+	cp user/cat.elf $(BUILD_DIR)/user/cat.elf
+	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 $(BUILD_DIR)/user/cat.elf $@
 
 # ---- Link kernel ----
 
@@ -72,7 +73,8 @@ $(KERNEL_ELF): $(BUILD_DIR)/start.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/serial.o 
                $(BUILD_DIR)/ramfs.o $(BUILD_DIR)/keyboard.o $(BUILD_DIR)/string.o $(BUILD_DIR)/stdlib.o \
                $(BUILD_DIR)/shell.o $(BUILD_DIR)/process.o $(BUILD_DIR)/switch.o \
                $(BUILD_DIR)/syscall.o $(BUILD_DIR)/syscall_entry.o $(BUILD_DIR)/msr.o \
-               $(BUILD_DIR)/elf.o $(BUILD_DIR)/user_hello.o $(BUILD_DIR)/user_cat.o
+               $(BUILD_DIR)/elf.o $(BUILD_DIR)/fat32.o $(BUILD_DIR)/user_hello.o $(BUILD_DIR)/user_cat.o \
+               $(BUILD_DIR)/vfs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/pipe.o
 	@mkdir -p $(BUILD_DIR)
 	$(LD) $(LDFLAGS) -o $@ $^
 
