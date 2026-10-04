@@ -94,7 +94,7 @@ $(KERNEL_ELF): $(BUILD_DIR)/start.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/serial.o 
                $(BUILD_DIR)/ramfs.o $(BUILD_DIR)/keyboard.o $(BUILD_DIR)/string.o $(BUILD_DIR)/stdlib.o \
                $(BUILD_DIR)/shell.o $(BUILD_DIR)/process.o $(BUILD_DIR)/switch.o \
                $(BUILD_DIR)/syscall.o $(BUILD_DIR)/syscall_entry.o $(BUILD_DIR)/msr.o \
-               $(BUILD_DIR)/elf.o $(BUILD_DIR)/fat32.o $(BUILD_DIR)/vfs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/pipe.o \
+               $(BUILD_DIR)/elf.o $(BUILD_DIR)/fat32.o $(BUILD_DIR)/vfs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/pipe.o $(BUILD_DIR)/pci.o \
                $(BUILD_DIR)/user_hello.o $(BUILD_DIR)/user_cat.o $(BUILD_DIR)/user_init.o $(BUILD_DIR)/user_ls.o $(BUILD_DIR)/user_cp.o
 	@mkdir -p $(BUILD_DIR)
 	$(LD) $(LDFLAGS) -o $@ $^
@@ -174,6 +174,28 @@ $(HDD_IMAGE): $(KERNEL_ELF)
 	fi
 	@echo "HDD image built successfully: $(HDD_IMAGE)"
 
+# ---- Test FAT32 image (MBR partitioned, for A1 testing) ----
+FAT32_TEST_IMAGE = $(BUILD_DIR)/fat32_test.img
+
+$(FAT32_TEST_IMAGE):
+	@echo "Building MBR-partitioned FAT32 test image..."
+	@mkdir -p $(BUILD_DIR)
+	@rm -f $(FAT32_TEST_IMAGE)
+	# Create a 16MB raw disk image
+	dd if=/dev/zero of=$(FAT32_TEST_IMAGE) bs=1M count=16 status=none
+	# Partition with single FAT32 partition (2048 sector offset = 1MiB)
+	parted -s $(FAT32_TEST_IMAGE) mklabel msdos
+	parted -s $(FAT32_TEST_IMAGE) mkpart primary fat32 1MiB 100%
+	parted -s $(FAT32_TEST_IMAGE) set 1 boot on
+	# Format FAT32 on partition using mkfs.fat with offset
+	mkfs.fat -F 32 --offset 2048 $(FAT32_TEST_IMAGE)
+	# Create mtools config for this image
+	@echo "drive d: file=\"$(FAT32_TEST_IMAGE)\" partition=1" > $(BUILD_DIR)/mtools_test.conf
+	# Copy test files using mtools
+	MTOOLSRC=$(BUILD_DIR)/mtools_test.conf mcopy README.md d:/
+	MTOOLSRC=$(BUILD_DIR)/mtools_test.conf mcopy Makefile d:/
+	@echo "FAT32 test image built: $(FAT32_TEST_IMAGE)"
+
 # ---- Run targets ----
 
 # Run ISO in QEMU (BIOS mode)
@@ -209,6 +231,16 @@ run-test: $(HDD_IMAGE)
 		$(QEMU) $(QEMU_FLAGS) -drive file=$(HDD_IMAGE),format=raw,if=ide -no-reboot -no-shutdown; \
 	else \
 		echo "ERROR: HDD image not found. Run 'make hdd' first."; \
+		exit 1; \
+	fi
+
+# Run FAT32 test image (MBR partitioned, for A1 milestone testing)
+run-fat32-test: $(FAT32_TEST_IMAGE)
+	@echo "Starting QEMU for FAT32 test image..."
+	@if [ -f "$(FAT32_TEST_IMAGE)" ]; then \
+		$(QEMU) $(QEMU_FLAGS) -drive file=$(FAT32_TEST_IMAGE),format=raw,if=ide -no-reboot -no-shutdown; \
+	else \
+		echo "ERROR: FAT32 test image not found. Run 'make $(FAT32_TEST_IMAGE)' first."; \
 		exit 1; \
 	fi
 

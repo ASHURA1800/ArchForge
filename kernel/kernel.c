@@ -24,8 +24,10 @@
 #include "vfs.h"
 #include "ata.h"
 #include "pipe.h"
+#include "pci.h"
 #include "fat32.h"
 #include "string.h"
+#include "pci.h"
 
 /* ====================================================================
  * Limine Protocol Requests
@@ -237,12 +239,48 @@ void kernel_main(void) {
     /* ---- Step 11b: Initialize ATA PIO Driver ---- */
     serial_write("[KERNEL] Initializing ATA PIO driver...\n");
     ata_init();
+    pci_scan();
     
     /* ---- Step 11c: Initialize FAT32 Filesystem ---- */
     serial_write("[KERNEL] Initializing FAT32 filesystem...\n");
     fat32_fs_t fat32_fs;
-    if (fat32_init(0, &fat32_fs) == 0) {
-        serial_write("[KERNEL] FAT32 mounted successfully on drive 0.\n");
+    int fat32_found = 0;
+    
+    /* Scan drives 0 and 1 for FAT32 partitions */
+    for (int drive = 0; drive <= 1; drive++) {
+        if (fat32_init(drive, &fat32_fs) == 0) {
+            serial_write("[KERNEL] FAT32 mounted successfully on drive ");
+            char drive_str[2];
+            drive_str[0] = '0' + drive;
+            drive_str[1] = '\0';
+            serial_write(drive_str);
+            serial_write(".\n");
+            fat32_found = 1;
+            break;
+        }
+    }
+    
+    if (fat32_found) {
+        serial_write("[FAT32] Testing read from MBR-partitioned image...\n");
+        /* Try to find the root directory (cluster 2 for FAT32 typically) */
+        fat32_dir_entry_t entries[16];
+        int count = fat32_read_dir(&fat32_fs, fat32_fs.root_cluster, entries, 16);
+        if (count > 0) {
+            serial_write("[FAT32] Found ");
+            serial_write_dec(count);
+            serial_write(" directory entries:\n");
+            for (int i = 0; i < count; i++) {
+                char name[13];
+                fat32_format_name(entries[i].name, name);
+                serial_write("  - ");
+                serial_write(name);
+                serial_write(" (");
+                serial_write_dec(entries[i].file_size);
+                serial_write(" bytes)\n");
+            }
+        } else {
+            serial_write("[FAT32] No directory entries found or error\n");
+        }
     } else {
         serial_write("[KERNEL] WARNING: FAT32 initialization failed (no FAT32 drive found).\n");
     }
