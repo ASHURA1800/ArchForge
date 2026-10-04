@@ -94,7 +94,7 @@ $(KERNEL_ELF): $(BUILD_DIR)/start.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/serial.o 
                $(BUILD_DIR)/ramfs.o $(BUILD_DIR)/keyboard.o $(BUILD_DIR)/string.o $(BUILD_DIR)/stdlib.o \
                $(BUILD_DIR)/shell.o $(BUILD_DIR)/process.o $(BUILD_DIR)/switch.o \
                $(BUILD_DIR)/syscall.o $(BUILD_DIR)/syscall_entry.o $(BUILD_DIR)/msr.o \
-               $(BUILD_DIR)/elf.o $(BUILD_DIR)/fat32.o $(BUILD_DIR)/vfs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/pipe.o $(BUILD_DIR)/pci.o \
+               $(BUILD_DIR)/elf.o $(BUILD_DIR)/fat32.o $(BUILD_DIR)/vfs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/pipe.o $(BUILD_DIR)/pci.o $(BUILD_DIR)/e1000.o \
                $(BUILD_DIR)/user_hello.o $(BUILD_DIR)/user_cat.o $(BUILD_DIR)/user_init.o $(BUILD_DIR)/user_ls.o $(BUILD_DIR)/user_cp.o
 	@mkdir -p $(BUILD_DIR)
 	$(LD) $(LDFLAGS) -o $@ $^

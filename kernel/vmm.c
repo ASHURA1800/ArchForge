@@ -271,3 +271,15 @@ void handle_page_fault(uint64_t error_code, uint64_t faulting_addr) {
     serial_write("[PAGE FAULT] FATAL: Unhandled page fault!\n");
     for (;;) __asm__ volatile("hlt");
 }
+
+/* Map MMIO region (uncached, user or kernel) */
+int vmm_map_mmio(uint64_t virt, uint64_t phys, size_t size, uint64_t flags) {
+    // Ensure uncached for MMIO
+    flags |= PTE_PCD | PTE_PWT;
+    for (size_t i = 0; i < size; i += 0x1000) {
+        if (vmm_map_page(virt + i, phys + i, flags) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}

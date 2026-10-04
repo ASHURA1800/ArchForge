@@ -2,6 +2,7 @@
 #define ARCHFORGE_VMM_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 /* Page Table Entry flags (bits 0-11) */
@@ -58,5 +59,8 @@ void vmm_free_user_space(uint64_t *pml4);
 
 /* Handle page fault */
 void handle_page_fault(uint64_t error_code, uint64_t faulting_addr);
+
+/* Map MMIO region (uncached, user or kernel) */
+int vmm_map_mmio(uint64_t virt, uint64_t phys, size_t size, uint64_t flags);
 
 #endif /* ARCHFORGE_VMM_H */
