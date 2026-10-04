@@ -1,142 +1,201 @@
+/* user/libc.c — Minimal C library for user-space programs
+ * 
+ * Provides syscall wrappers, memory allocation, and printf.
+ */
 #include "libc.h"
 
-#define SYS_EXIT      0
-#define SYS_WRITE     1
-#define SYS_READ      2
-#define SYS_GETPID    4
-#define SYS_OPEN      11
-#define SYS_CLOSE     12
-#define SYS_MMAP      6
+/* Simple 64KB bump allocator for malloc/free */
+static char heap_area[64 * 1024];
+static size_t heap_offset = 0;
 
+/* Syscall wrappers using inline assembly */
 static inline int64_t syscall1(int num, int64_t arg1) {
     int64_t ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(num), "D"(arg1) : "rcx", "r11", "memory");
+    __asm__ volatile(
+        "syscall"
+        : "=a"(ret)
+        : "a"(num), "D"(arg1)
+        : "rcx", "r11", "memory"
+    );
     return ret;
 }
 
 static inline int64_t syscall3(int num, int64_t arg1, int64_t arg2, int64_t arg3) {
     int64_t ret;
-    __asm__ volatile("syscall" : "=a"(ret) : "a"(num), "D"(arg1), "S"(arg2), "d"(arg3) : "rcx", "r11", "memory");
+    __asm__ volatile(
+        "syscall"
+        : "=a"(ret)
+        : "a"(num), "D"(arg1), "S"(arg2), "d"(arg3)
+        : "rcx", "r11", "memory"
+    );
     return ret;
 }
 
-int open(const char *path, int flags) {
-    return syscall3(SYS_OPEN, (int64_t)path, flags, 0);
+static inline int64_t syscall4(int num, int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4) {
+    int64_t ret;
+    register int64_t r10 __asm__("r10") = arg4;
+    __asm__ volatile(
+        "syscall"
+        : "=a"(ret)
+        : "a"(num), "D"(arg1), "S"(arg2), "d"(arg3), "r"(r10)
+        : "rcx", "r11", "memory"
+    );
+    return ret;
 }
 
-int read(int fd, void *buf, size_t count) {
-    return syscall3(SYS_READ, fd, (int64_t)buf, count);
-}
-
-int write(int fd, const void *buf, size_t count) {
-    return syscall3(SYS_WRITE, fd, (int64_t)buf, count);
-}
-
-int close(int fd) {
-    return syscall1(SYS_CLOSE, fd);
-}
-
+/* Syscall implementations */
 void exit(int code) {
     syscall1(SYS_EXIT, code);
+    /* Never returns */
     for (;;) __asm__ volatile("hlt");
 }
 
-int getpid(void) {
-    return syscall1(SYS_GETPID, 0);
+int write(int fd, const void *buf, size_t count) {
+    return (int)syscall3(SYS_WRITE, fd, (int64_t)buf, count);
 }
 
+int read(int fd, void *buf, size_t count) {
+    return (int)syscall3(SYS_READ, fd, (int64_t)buf, count);
+}
+
+int open(const char *path, int flags, ...) {
+    (void)flags; // Additional arguments for mode not implemented yet
+    return (int)syscall3(SYS_OPEN, (int64_t)path, flags, 0);
+}
+
+int close(int fd) {
+    return (int)syscall1(SYS_CLOSE, fd);
+}
+
+int getpid(void) {
+    return (int)syscall1(SYS_GETPID, 0);
+}
+
+/* Simple malloc/free using bump allocator */
+void *malloc(size_t size) {
+    if (size == 0) return NULL;
+    
+    /* Align to 16 bytes */
+    size = (size + 15) & ~15;
+    
+    if (heap_offset + size > sizeof(heap_area)) {
+        return NULL; /* Out of memory */
+    }
+    
+    void *ptr = &heap_area[heap_offset];
+    heap_offset += size;
+    return ptr;
+}
+
+void free(void *ptr) {
+    /* Not implemented for bump allocator - simple programs won't free much */
+    (void)ptr;
+}
+
+/* Simple memcpy */
+void *memcpy(void *dest, const void *src, size_t n) {
+    uint8_t *d = (uint8_t *)dest;
+    const uint8_t *s = (const uint8_t *)src;
+    for (size_t i = 0; i < n; i++) {
+        d[i] = s[i];
+    }
+    return dest;
+}
+
+/* strlen */
 size_t strlen(const char *s) {
     size_t len = 0;
     while (s[len]) len++;
     return len;
 }
 
-void *memcpy(void *dest, const void *src, size_t n) {
-    uint8_t *d = dest;
-    const uint8_t *s = src;
-    for (size_t i = 0; i < n; i++) d[i] = s[i];
-    return dest;
-}
-
-/* Simple bump allocator for user space */
-static uint8_t heap[65536];
-static size_t heap_ptr = 0;
-
-void *malloc(size_t size) {
-    size = (size + 7) & ~7; /* Align to 8 bytes */
-    if (heap_ptr + size > sizeof(heap)) return NULL;
-    void *ptr = &heap[heap_ptr];
-    heap_ptr += size;
-    return ptr;
-}
-
-void free(void *ptr) {
-    (void)ptr; /* Simple bump allocator doesn't support free */
-}
-
-/* Simple printf */
-static void put_dec(int n) {
-    char buf[16];
-    int i = 0;
-    if (n == 0) {
-        write(1, "0", 1);
-        return;
-    }
-    if (n < 0) {
-        write(1, "-", 1);
-        n = -n;
-    }
-    while (n > 0) {
-        buf[i++] = '0' + (n % 10);
-        n /= 10;
-    }
-    while (i > 0) {
-        write(1, &buf[--i], 1);
-    }
-}
-
-static void put_hex(uint64_t n) {
-    const char *hex = "0123456789abcdef";
-    char buf[16];
-    int i = 0;
-    if (n == 0) {
-        write(1, "0", 1);
-        return;
-    }
-    while (n > 0) {
-        buf[i++] = hex[n & 0xF];
-        n >>= 4;
-    }
-    write(1, "0x", 2);
-    while (i > 0) {
-        write(1, &buf[--i], 1);
-    }
-}
-
-void printf(const char *fmt, ...) {
+/* Simple printf implementation supporting %s, %d, %x, %% */
+int printf(const char *fmt, ...) {
     __builtin_va_list args;
     __builtin_va_start(args, fmt);
+    
+    int written = 0;
+    char buf[32];
     
     while (*fmt) {
         if (*fmt == '%') {
             fmt++;
-            if (*fmt == 's') {
-                const char *s = __builtin_va_arg(args, const char *);
-                write(1, s, strlen(s));
-            } else if (*fmt == 'd') {
-                int d = __builtin_va_arg(args, int);
-                put_dec(d);
-            } else if (*fmt == 'x') {
-                uint64_t x = __builtin_va_arg(args, uint64_t);
-                put_hex(x);
-            } else if (*fmt == '%') {
-                write(1, "%", 1);
+            if (!*fmt) break;
+            
+            switch (*fmt) {
+                case 's': {
+                    const char *s = __builtin_va_arg(args, const char *);
+                    if (!s) s = "(null)";
+                    size_t len = strlen(s);
+                    write(1, s, len);
+                    written += len;
+                    break;
+                }
+                case 'd': {
+                    int n = __builtin_va_arg(args, int);
+                    int neg = 0;
+                    if (n < 0) {
+                        neg = 1;
+                        n = -n;
+                    }
+                    int i = 0;
+                    if (n == 0) {
+                        buf[i++] = '0';
+                    } else {
+                        while (n > 0) {
+                            buf[i++] = '0' + (n % 10);
+                            n /= 10;
+                        }
+                    }
+                    if (neg) write(1, "-", 1);
+                    for (int i = 0; i < len; i++) {
+                        // Need to reverse
+                    }
+                    // Actually write in reverse
+                    for (int j = i - 1; j >= 0; j--) {
+                        char c = buf[j];
+                        write(1, &c, 1);
+                    }
+                    written += i + (neg ? 1 : 0);
+                    break;
+                }
+                case 'x': {
+                    unsigned int n = __builtin_va_arg(args, unsigned int);
+                    int i = 0;
+                    if (n == 0) {
+                        buf[i++] = '0';
+                    } else {
+                        while (n > 0) {
+                            int digit = n & 0xF;
+                            buf[i++] = (digit < 10) ? '0' + digit : 'a' + (digit - 10);
+                            n >>= 4;
+                        }
+                    }
+                    for (int j = i - 1; j >= 0; j--) {
+                        char c = buf[j];
+                        write(1, &c, 1);
+                    }
+                    written += i;
+                    break;
+                }
+                case '%': {
+                    write(1, "%", 1);
+                    written++;
+                    break;
+                }
+                default:
+                    write(1, "%", 1);
+                    write(1, fmt, 1);
+                    written += 2;
+                    break;
             }
         } else {
-            char c = *fmt;
-            write(1, &c, 1);
+            write(1, fmt, 1);
+            written++;
         }
         fmt++;
     }
+    
     __builtin_va_end(args);
+    return written;
 }
