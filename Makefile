@@ -7,7 +7,8 @@ LD = ld.lld
 
 # Compiler flags
 CFLAGS = -target x86_64-elf -ffreestanding -fno-stack-protector -fno-pie -fno-pic \
-         -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -mcmodel=kernel -Wall -Wextra -I./include -O2
+         -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -mcmodel=kernel -Wall -Wextra -I./include -O2 \
+         -MMD -MP
 
 # Linker flags
 LDFLAGS = -nostdlib -T kernel/linker.ld -z max-page-size=0x1000
@@ -27,10 +28,13 @@ HDD_IMAGE = $(BUILD_DIR)/archforge.img
 # Limine deployment
 LIMINE_DIR = $(BUILD_DIR)/limine
 LIMINE_CFG = $(BOOT_DIR)/limine.conf
+LIMINE_URL = https://github.com/limine-bootloader/limine/releases/download/v12.6.1/limine-binary.tar.gz
 
 # QEMU settings
 QEMU = qemu-system-x86_64
-QEMU_FLAGS = -M q35 -m 2G -serial stdio
+QEMU_FLAGS = -M pc -m 512M -serial file:$(BUILD_DIR)/serial.log -display none -no-reboot -no-shutdown \
+             -d guest_errors,cpu_reset -D $(BUILD_DIR)/qemu.log \
+             -device isa-debug-exit,iobase=0xf4,iosize=0x04
 OVMF_PATH = /usr/share/OVMF/OVMF_CODE.fd
 
 .PHONY: all clean run run-uefi run-hdd iso hdd debug verify-iso help
@@ -43,11 +47,15 @@ all: $(ISO_IMAGE) $(HDD_IMAGE)
 $(BUILD_DIR)/user/hello.elf $(BUILD_DIR)/user/cat.elf $(BUILD_DIR)/user/init.elf $(BUILD_DIR)/user/ls.elf $(BUILD_DIR)/user/cp.elf:
 	@mkdir -p $(BUILD_DIR)/user
 	$(MAKE) -C user
+	cp user/*.elf $(BUILD_DIR)/user/
 
 # Compile C files
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# Include generated dependency files
+-include $(wildcard $(BUILD_DIR)/*.d)
 
 # Compile assembly files
 $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.S
@@ -58,10 +66,12 @@ $(BUILD_DIR)/%.o: $(KERNEL_DIR)/%.S
 $(BUILD_DIR)/user_hello.o: $(BUILD_DIR)/user/hello.elf
 	@mkdir -p $(dir $@)
 	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 $< $@
+	objcopy --rename-section .data=.data.user_hello $@ $@
 
 $(BUILD_DIR)/user_cat.o: $(BUILD_DIR)/user/cat.elf
 	@mkdir -p $(dir $@)
 	objcopy -I binary -O elf64-x86-64 -B i386:x86-64 $< $@
+	objcopy --rename-section .data=.data.user_cat $@ $@
 
 $(BUILD_DIR)/user_init.o: $(BUILD_DIR)/user/init.elf
 	@mkdir -p $(dir $@)
@@ -91,7 +101,16 @@ $(KERNEL_ELF): $(BUILD_DIR)/start.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/serial.o 
 
 # ---- ISO image ----
 
-$(ISO_DIR): $(KERNEL_ELF)
+# Download limine if missing
+$(LIMINE_DIR)/limine-bios.sys:
+	@mkdir -p $(LIMINE_DIR)
+	@echo "Downloading limine..."
+	curl -L -o $(LIMINE_DIR)/limine-binary.tar.gz $(LIMINE_URL)
+	tar -xzf $(LIMINE_DIR)/limine-binary.tar.gz -C $(LIMINE_DIR) --strip-components=1
+	mkdir -p $(LIMINE_DIR)/bin
+	cc -O2 -Wall -Wextra -o $(LIMINE_DIR)/bin/limine-deploy $(LIMINE_DIR)/limine.c
+
+$(ISO_DIR): $(KERNEL_ELF) $(LIMINE_DIR)/limine-bios.sys
 	@rm -rf $(ISO_DIR)
 	@mkdir -p $(ISO_DIR)/boot/limine
 	@mkdir -p $(ISO_DIR)/limine
@@ -106,9 +125,10 @@ $(ISO_DIR): $(KERNEL_ELF)
 	cp $(LIMINE_DIR)/limine-bios.sys $(ISO_DIR)/limine-bios.sys
 	cp $(LIMINE_DIR)/limine-bios.sys $(ISO_DIR)/limine.sys
 	cp $(LIMINE_DIR)/limine-bios.sys $(ISO_DIR)/boot/limine.sys
-	# Boot images + UEFI
+	# Boot images + UEFI - also copy limine-cd.bin to root for El Torito
 	cp $(LIMINE_DIR)/limine-bios-cd.bin  $(ISO_DIR)/boot/limine-bios-cd.bin
 	cp $(LIMINE_DIR)/limine-bios-cd.bin  $(ISO_DIR)/boot/limine-cd.bin
+	cp $(LIMINE_DIR)/limine-bios-cd.bin  $(ISO_DIR)/limine-cd.bin
 	cp $(LIMINE_DIR)/limine-uefi-cd.bin  $(ISO_DIR)/boot/limine-uefi-cd.bin
 	cp $(LIMINE_DIR)/BOOTX64.EFI         $(ISO_DIR)/EFI/BOOT/BOOTX64.EFI
 
@@ -127,46 +147,32 @@ $(ISO_IMAGE): $(ISO_DIR)
 	fi
 	@echo "ISO built successfully: $(ISO_IMAGE)"
 
-# ---- HDD image (simpler, more reliable for development) ----
+# ---- HDD image (no-sudo version using mtools) ----
 
 $(HDD_IMAGE): $(KERNEL_ELF)
-	@echo "Building HDD image..."
+	@echo "Building HDD image (no-sudo)..."
 	@rm -f $(HDD_IMAGE)
 	# Create a 64MB raw disk image
 	dd if=/dev/zero of=$(HDD_IMAGE) bs=1M count=64 status=none
-	# Partition with single FAT32 partition
-	parted -s $(HDD_IMAGE) mklabel msdos
-	parted -s $(HDD_IMAGE) mkpart primary fat32 1MiB 100%
-	parted -s $(HDD_IMAGE) set 1 boot on
-	# Format as FAT32 (loop device with offset)
-	@LOOPDEV=$$(sudo losetup -f --show -o 1048576 --sizelimit 66060288 $(HDD_IMAGE) 2>/dev/null || echo ""); \
-	if [ -n "$$LOOPDEV" ]; then \
-		sudo mkfs.fat -F 32 $$LOOPDEV >/dev/null 2>&1; \
-		TMPDIR=$$(mktemp -d); \
-		sudo mount $$LOOPDEV $$TMPDIR; \
-		sudo mkdir -p $$TMPDIR/boot/limine; \
-		sudo cp $(KERNEL_ELF) $$TMPDIR/boot/kernel.elf; \
-		sudo cp $(LIMINE_CFG) $$TMPDIR/limine.conf; \
-		sudo cp $(LIMINE_CFG) $$TMPDIR/boot/limine.conf; \
-		sudo cp $(LIMINE_DIR)/limine-bios.sys $$TMPDIR/boot/limine/limine-bios.sys; \
-		sudo cp $(LIMINE_DIR)/limine-bios.sys $$TMPDIR/limine-bios.sys; \
-		sudo cp $(LIMINE_DIR)/limine-bios.sys $$TMPDIR/limine.sys; \
-		sudo umount $$TMPDIR; \
-		rmdir $$TMPDIR; \
-		sudo losetup -d $$LOOPDEV; \
-	else \
-		echo "WARNING: Could not set up loop device. HDD image not created."; \
-		rm -f $(HDD_IMAGE); \
+	# Format entire disk as FAT32 (superfloppy - no partition table)
+	mkfs.fat -F 32 $(HDD_IMAGE)
+	# Create mtools config for this image (no partition, no offset)
+	@echo "drive c: file=\"$(HDD_IMAGE)\"" > $(BUILD_DIR)/mtools.conf
+	# Copy kernel and limine files using mtools
+	MTOOLSRC=$(BUILD_DIR)/mtools.conf mmd c:/boot c:/boot/limine
+	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(KERNEL_ELF) c:/boot/kernel.elf
+	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(LIMINE_CFG) c:/limine.conf
+	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(LIMINE_CFG) c:/boot/limine.conf
+	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(LIMINE_DIR)/limine-bios.sys c:/boot/limine/limine-bios.sys
+	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(LIMINE_DIR)/limine-bios.sys c:/limine-bios.sys
+	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(LIMINE_DIR)/limine-bios.sys c:/limine.sys
+	# Deploy Limine to MBR with --force
+	@if [ -f "$(LIMINE_DIR)/bin/limine-deploy" ]; then \
+		$(LIMINE_DIR)/bin/limine-deploy bios-install --force $(HDD_IMAGE); \
+	elif command -v limine-deploy >/dev/null 2>&1; then \
+		limine-deploy bios-install --force $(HDD_IMAGE); \
 	fi
-	# Deploy Limine to MBR
-	@if [ -f "$(HDD_IMAGE)" ]; then \
-		if [ -f "$(LIMINE_DIR)/bin/limine-deploy" ]; then \
-			$(LIMINE_DIR)/bin/limine-deploy bios-install $(HDD_IMAGE); \
-		elif command -v limine-deploy >/dev/null 2>&1; then \
-			limine-deploy bios-install $(HDD_IMAGE); \
-		fi; \
-		echo "HDD image built successfully: $(HDD_IMAGE)"; \
-	fi
+	@echo "HDD image built successfully: $(HDD_IMAGE)"
 
 # ---- Run targets ----
 
@@ -190,7 +196,17 @@ run-uefi: $(ISO_IMAGE)
 run-hdd: $(HDD_IMAGE)
 	@echo "Starting QEMU (BIOS mode, HDD image)..."
 	@if [ -f "$(HDD_IMAGE)" ]; then \
-		$(QEMU) $(QEMU_FLAGS) -hda $(HDD_IMAGE) -no-reboot -no-shutdown; \
+		$(QEMU) $(QEMU_FLAGS) -drive file=$(HDD_IMAGE),format=raw,if=ide -no-reboot -no-shutdown; \
+	else \
+		echo "ERROR: HDD image not found. Run 'make hdd' first."; \
+		exit 1; \
+	fi
+
+# Run HDD image with FAT32 test (uses the HDD image)
+run-test: $(HDD_IMAGE)
+	@echo "Starting QEMU for FAT32 test..."
+	@if [ -f "$(HDD_IMAGE)" ]; then \
+		$(QEMU) $(QEMU_FLAGS) -drive file=$(HDD_IMAGE),format=raw,if=ide -no-reboot -no-shutdown; \
 	else \
 		echo "ERROR: HDD image not found. Run 'make hdd' first."; \
 		exit 1; \

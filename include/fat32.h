@@ -64,6 +64,7 @@ typedef struct {
     uint32_t fat_size_32;
     uint32_t fat_start_sector;
     uint8_t *fat_buffer; /* Cached FAT table */
+    uint32_t partition_lba; /* Partition start LBA (for MBR) */
 } fat32_fs_t;
 
 /* Initialize FAT32 filesystem on given drive */

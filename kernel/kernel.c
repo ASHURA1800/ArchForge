@@ -366,9 +366,28 @@ void kernel_main(void) {
     /* ---- Step 16: Launch Init Process (Phase 30) ---- */
     serial_write("[KERNEL] Launching /sbin/init...\n");
     
-    /* Try to spawn user-space init */
-    if (process_create_elf("/sbin/init") != 0) {
-        serial_write("[KERNEL] WARNING: Failed to spawn /sbin/init, falling back to kernel shell.\n");
+    /* Try to spawn user-space init from VFS */
+    vfs_node_t *init_node = vfs_resolve("/sbin/init");
+    if (init_node && init_node->type == VFS_TYPE_FILE) {
+        uint8_t *init_data = kmalloc(init_node->size);
+        if (init_data && vfs_read(init_node, init_data, init_node->size, 0) >= 0) {
+            if (process_create_elf(init_data, init_node->size) == 0) {
+                kfree(init_data);
+                serial_write("[KERNEL] /sbin/init launched successfully.\n");
+            } else {
+                kfree(init_data);
+                serial_write("[KERNEL] WARNING: Failed to spawn /sbin/init, falling back to kernel shell.\n");
+                shell_init();
+                shell_run();
+            }
+        } else {
+            if (init_data) kfree(init_data);
+            serial_write("[KERNEL] WARNING: Failed to read /sbin/init, falling back to kernel shell.\n");
+            shell_init();
+            shell_run();
+        }
+    } else {
+        serial_write("[KERNEL] WARNING: /sbin/init not found in VFS, falling back to kernel shell.\n");
         shell_init();
         shell_run();
     }

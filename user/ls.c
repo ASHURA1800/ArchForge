@@ -33,8 +33,3 @@ int main(int argc, char *argv[]) {
     fclose(f);
     return 0;
 }
-
-// Simple putchar for ls
-int putchar(int c) {
-    return write(1, &c, 1);
-}

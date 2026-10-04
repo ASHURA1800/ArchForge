@@ -8,9 +8,14 @@
 #include "serial.h"
 #include "../include/string.h"
 
-/* Helper to read a sector */
-static int read_sector(int drive, uint32_t lba, void *buffer) {
-    return ata_read_sector(lba, (uint8_t *)buffer, 1);
+/* Helper to read a sector (with partition offset) */
+static int read_sector(fat32_fs_t *fs, uint32_t lba, void *buffer) {
+    return ata_read_sector(lba + fs->partition_lba, (uint8_t *)buffer, 1);
+}
+
+/* Helper to write a sector (with partition offset) */
+static int write_sector(fat32_fs_t *fs, uint32_t lba, const void *buffer) {
+    return ata_write_sector(lba + fs->partition_lba, (const uint8_t *)buffer, 1);
 }
 
 /* Helper to get cluster from directory entry */
@@ -25,7 +30,7 @@ static uint32_t get_next_cluster(fat32_fs_t *fs, uint32_t cluster) {
     uint32_t fat_entry_offset = fat_offset % fs->bytes_per_sector;
     
     uint8_t sector[512];
-    if (read_sector(fs->drive, fat_sector, sector) != 0) {
+    if (read_sector(fs, fat_sector, sector) != 0) {
         return 0x0FFFFFFF; /* Error */
     }
     
@@ -59,8 +64,40 @@ static void format_fat_name(const uint8_t *fat_name, char *out) {
 
 /* Initialize FAT32 filesystem */
 int fat32_init(int drive, fat32_fs_t *fs) {
+    /* First, read the MBR (LBA 0) to find the FAT32 partition */
+    uint8_t mbr[512];
+    if (ata_read_sector(0, mbr, 1) != 0) {
+        return -1;
+    }
+    
+    /* Check MBR signature */
+    if (mbr[510] != 0x55 || mbr[511] != 0xAA) {
+        return -1;
+    }
+    
+    /* Parse partition table (4 entries at offset 0x1BE) */
+    uint32_t partition_lba = 0;
+    for (int i = 0; i < 4; i++) {
+        uint8_t *entry = mbr + 0x1BE + i * 16;
+        uint8_t type = entry[4];
+        /* FAT32 partition types: 0x0B, 0x0C, 0x1B, 0x1C */
+        if (type == 0x0B || type == 0x0C || type == 0x1B || type == 0x1C) {
+            /* Read partition start LBA (little endian, 4 bytes at offset 8) */
+            partition_lba = *(uint32_t *)(entry + 8);
+            break;
+        }
+    }
+    
+    if (partition_lba == 0) {
+        return -1; /* No FAT32 partition found */
+    }
+    
+    fs->partition_lba = partition_lba;
+    fs->drive = drive;
+    
+    /* Now read the BPB from the partition start */
     fat32_bpb_t bpb;
-    if (read_sector(drive, 0, &bpb) != 0) {
+    if (read_sector(fs, 0, &bpb) != 0) {
         return -1;
     }
     
@@ -72,7 +109,6 @@ int fat32_init(int drive, fat32_fs_t *fs) {
         }
     }
     
-    fs->drive = drive;
     fs->bytes_per_sector = bpb.bytes_per_sector;
     fs->sectors_per_cluster = bpb.sectors_per_cluster;
     fs->root_cluster = bpb.root_cluster;
@@ -91,7 +127,9 @@ int fat32_init(int drive, fat32_fs_t *fs) {
     drive_str[0] = '0' + drive;
     drive_str[1] = '\0';
     serial_write(drive_str);
-    serial_write("\n");
+    serial_write(" (partition LBA: ");
+    serial_write_hex(partition_lba);
+    serial_write(")\n");
     
     return 0;
 }
@@ -109,7 +147,7 @@ int fat32_read_file(fat32_fs_t *fs, uint32_t cluster, void *buffer, size_t size,
         
         for (uint32_t i = 0; i < fs->sectors_per_cluster; i++) {
             uint8_t sec_buf[512];
-            if (read_sector(fs->drive, sector + i, sec_buf) != 0) {
+            if (read_sector(fs, sector + i, sec_buf) != 0) {
                 return -1;
             }
             
@@ -157,7 +195,7 @@ int fat32_read_dir(fat32_fs_t *fs, uint32_t cluster, void *buffer, size_t max_en
         
         for (uint32_t i = 0; i < fs->sectors_per_cluster; i++) {
             uint8_t sec_buf[512];
-            if (read_sector(fs->drive, sector + i, sec_buf) != 0) {
+            if (read_sector(fs, sector + i, sec_buf) != 0) {
                 return -1;
             }
             

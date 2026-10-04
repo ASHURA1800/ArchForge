@@ -10,9 +10,10 @@ ENTRY(_start)
 PHDRS
 {
     limine_requests PT_LOAD;
-    text PT_LOAD;
-    rodata PT_LOAD;
-    data PT_LOAD;
+    text PT_LOAD FLAGS(5);    /* R + X */
+    rodata PT_LOAD FLAGS(4);  /* R */
+    user_programs PT_LOAD FLAGS(5);  /* R + X for user programs */
+    data PT_LOAD FLAGS(6);    /* R + W */
 }
 
 SECTIONS
@@ -44,11 +45,20 @@ SECTIONS
         *(.rodata .rodata.*)
     } :rodata
 
-    /* Embedded user programs - put them in .data section */
-    .data : {
-        *(.data .data.*)
+    /* Move to the next memory page for .user_programs */
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
+    /* Embedded user programs - separate executable section */
+    .user_programs : {
         *(.data.user_hello)
         *(.data.user_cat)
+    } :user_programs
+
+    /* Move to the next memory page for .data */
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
+    .data : {
+        *(.data .data.*)
     } :data
 
     /* Add a .note.gnu.build-id output section in case a build ID flag is added to the */
