@@ -433,3 +433,88 @@ int fat32_read_dir(fat32_fs_t *fs, uint32_t cluster, void *buffer, size_t max_en
     
     return entry_count;
 }
+
+/* ====================================================================
+ * Cluster Allocator
+ * ==================================================================== */
+
+/* Count free clusters in FAT */
+uint32_t fat32_count_free_clusters(fat32_fs_t *fs) {
+    if (!fs->fat_buffer) return 0;
+    
+    uint32_t free_count = 0;
+    uint32_t total_clusters = (fs->fat_size_32 * fs->bytes_per_sector) / 4;
+    
+    for (uint32_t cluster = 2; cluster < total_clusters; cluster++) {
+        if (fat32_get_fat_entry(fs, cluster) == 0x00000000) {
+            free_count++;
+        }
+    }
+    
+    return free_count;
+}
+
+/* Allocate a free cluster */
+uint32_t fat32_alloc_cluster(fat32_fs_t *fs) {
+    if (!fs->fat_buffer) return 0;
+    
+    uint32_t total_clusters = (fs->fat_size_32 * fs->bytes_per_sector) / 4;
+    
+    /* Start from cluster 2 (first data cluster) or use FSInfo hint */
+    uint32_t start_cluster = 2;
+    
+    for (uint32_t cluster = start_cluster; cluster < total_clusters; cluster++) {
+        if (fat32_get_fat_entry(fs, cluster) == 0x00000000) {
+            /* Found free cluster - mark as EOC (End of Chain) */
+            if (fat32_set_fat_entry(fs, cluster, 0x0FFFFFFF) != 0) {
+                return 0;
+            }
+            
+            /* Update FSInfo sector if we have it cached */
+            /* TODO: Implement FSInfo update */
+            
+            return cluster;
+        }
+    }
+    
+    return 0; /* No free clusters */
+}
+
+/* Free a single cluster */
+int fat32_free_cluster(fat32_fs_t *fs, uint32_t cluster) {
+    if (!fs->fat_buffer) return -1;
+    if (cluster < 2) return -1;
+    
+    uint32_t total_clusters = (fs->fat_size_32 * fs->bytes_per_sector) / 4;
+    if (cluster >= total_clusters) return -1;
+    
+    /* Mark cluster as free (0) */
+    if (fat32_set_fat_entry(fs, cluster, 0x00000000) != 0) {
+        return -1;
+    }
+    
+    return 0;
+}
+
+/* Free an entire cluster chain */
+int fat32_free_chain(fat32_fs_t *fs, uint32_t start_cluster) {
+    if (!fs->fat_buffer) return -1;
+    if (start_cluster < 2) return -1;
+    
+    uint32_t total_clusters = (fs->fat_size_32 * fs->bytes_per_sector) / 4;
+    if (start_cluster >= total_clusters) return -1;
+    
+    uint32_t cluster = start_cluster;
+    while (cluster >= 2 && cluster <= 0x0FFFFFF6) {
+        uint32_t next = fat32_get_fat_entry(fs, cluster);
+        
+        /* Mark current cluster as free */
+        if (fat32_set_fat_entry(fs, cluster, 0x00000000) != 0) {
+            return -1;
+        }
+        
+        cluster = next;
+    }
+    
+    return 0;
+}

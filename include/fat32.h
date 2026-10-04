@@ -101,4 +101,10 @@ int fat32_load_fat_cache(fat32_fs_t *fs);
 uint32_t fat32_get_fat_entry(fat32_fs_t *fs, uint32_t cluster);
 int fat32_set_fat_entry(fat32_fs_t *fs, uint32_t cluster, uint32_t value);
 
+/* Cluster allocator */
+uint32_t fat32_alloc_cluster(fat32_fs_t *fs);
+int fat32_free_cluster(fat32_fs_t *fs, uint32_t cluster);
+int fat32_free_chain(fat32_fs_t *fs, uint32_t start_cluster);
+uint32_t fat32_count_free_clusters(fat32_fs_t *fs);
+
 #endif
