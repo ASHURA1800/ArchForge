@@ -65,6 +65,17 @@ typedef struct {
     uint32_t fat_start_sector;
     uint8_t *fat_buffer; /* Cached FAT table */
     uint32_t partition_lba; /* Partition start LBA (for MBR) */
+
+    /* Block cache (write-through) */
+    struct {
+        uint32_t sector_lba;
+        uint8_t  *data;
+        uint8_t  valid;
+        uint8_t  dirty;
+        uint64_t last_access;
+    } block_cache[8];
+    uint32_t cache_hits;
+    uint32_t cache_misses;
 } fat32_fs_t;
 
 /* Initialize FAT32 filesystem on given drive */
@@ -78,5 +89,16 @@ int fat32_read_dir(fat32_fs_t *fs, uint32_t cluster, void *buffer, size_t max_en
 
 /* Convert FAT name to standard string */
 void fat32_format_name(const uint8_t *fat_name, char *out);
+
+/* Cache management */
+int fat32_cache_read_sector(fat32_fs_t *fs, uint32_t lba, void *buffer);
+int fat32_cache_write_sector(fat32_fs_t *fs, uint32_t lba, const void *buffer);
+void fat32_cache_flush(fat32_fs_t *fs);
+void fat32_cache_stats(fat32_fs_t *fs, uint32_t *hits, uint32_t *misses);
+
+/* FAT cache management */
+int fat32_load_fat_cache(fat32_fs_t *fs);
+uint32_t fat32_get_fat_entry(fat32_fs_t *fs, uint32_t cluster);
+int fat32_set_fat_entry(fat32_fs_t *fs, uint32_t cluster, uint32_t value);
 
 #endif

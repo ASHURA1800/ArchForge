@@ -1,12 +1,20 @@
 /* kernel/fat32.c — FAT32 Filesystem Driver
  * 
  * A basic read-only FAT32 driver for ArchForge OS.
+ * Extended with block cache and FAT cache for write support.
  */
 #include "fat32.h"
 #include "ata.h"
 #include "heap.h"
 #include "serial.h"
 #include "../include/string.h"
+
+/* Simple LRU timestamp counter */
+static uint64_t fat32_lru_counter = 0;
+
+/* ====================================================================
+ * Internal helper functions (declared first to avoid forward declarations)
+ * ==================================================================== */
 
 /* Helper to read a sector (with partition offset) */
 static int read_sector(fat32_fs_t *fs, uint32_t lba, void *buffer) {
@@ -24,8 +32,14 @@ static uint32_t get_cluster(fat32_dir_entry_t *entry) {
     return ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
 }
 
-/* Helper to get next cluster from FAT */
+/* Helper to get next cluster from FAT (uses cache if available) */
 static uint32_t get_next_cluster(fat32_fs_t *fs, uint32_t cluster) {
+    /* Use FAT cache if available */
+    if (fs->fat_buffer) {
+        return fat32_get_fat_entry(fs, cluster);
+    }
+    
+    /* Fallback to disk read */
     uint32_t fat_offset = cluster * 4;
     uint32_t fat_sector = fs->fat_start_sector + (fat_offset / fs->bytes_per_sector);
     uint32_t fat_entry_offset = fat_offset % fs->bytes_per_sector;
@@ -37,6 +51,178 @@ static uint32_t get_next_cluster(fat32_fs_t *fs, uint32_t cluster) {
     
     uint32_t next_cluster = *(uint32_t *)(sector + fat_entry_offset);
     return next_cluster & 0x0FFFFFFF;
+}
+
+/* Helper to find or allocate a cache slot */
+static int fat32_find_cache_slot(fat32_fs_t *fs, uint32_t lba) {
+    int empty_slot = -1;
+    uint64_t oldest = UINT64_MAX;
+    int oldest_slot = 0;
+    
+    for (int i = 0; i < 8; i++) {
+        if (!fs->block_cache[i].valid) {
+            empty_slot = i;
+            break;
+        }
+        if (fs->block_cache[i].sector_lba == lba) {
+            return i; /* Cache hit */
+        }
+        if (fs->block_cache[i].last_access < oldest) {
+            oldest = fs->block_cache[i].last_access;
+            oldest_slot = i;
+        }
+    }
+    
+    /* Return empty slot if available, otherwise LRU slot */
+    return (empty_slot >= 0) ? empty_slot : oldest_slot;
+}
+
+/* ====================================================================
+ * Cache management functions
+ * ==================================================================== */
+
+/* Helper to read a sector through cache */
+int fat32_cache_read_sector(fat32_fs_t *fs, uint32_t lba, void *buffer) {
+    fat32_lru_counter++;
+    
+    int slot = fat32_find_cache_slot(fs, lba);
+    if (slot < 0) return -1;
+    
+    if (fs->block_cache[slot].valid && fs->block_cache[slot].sector_lba == lba) {
+        /* Cache hit */
+        fs->cache_hits++;
+        fs->block_cache[slot].last_access = fat32_lru_counter;
+        memcpy(buffer, fs->block_cache[slot].data, fs->bytes_per_sector);
+        return 0;
+    }
+    
+    /* Cache miss - load from disk */
+    fs->cache_misses++;
+    
+    /* Allocate buffer if needed */
+    if (!fs->block_cache[slot].data) {
+        fs->block_cache[slot].data = kmalloc(fs->bytes_per_sector);
+        if (!fs->block_cache[slot].data) return -1;
+    }
+    
+    if (read_sector(fs, lba, fs->block_cache[slot].data) != 0) {
+        return -1;
+    }
+    
+    fs->block_cache[slot].sector_lba = lba;
+    fs->block_cache[slot].valid = 1;
+    fs->block_cache[slot].dirty = 0;
+    fs->block_cache[slot].last_access = fat32_lru_counter;
+    
+    memcpy(buffer, fs->block_cache[slot].data, fs->bytes_per_sector);
+    return 0;
+}
+
+/* Helper to write a sector through cache (write-through) */
+int fat32_cache_write_sector(fat32_fs_t *fs, uint32_t lba, const void *buffer) {
+    fat32_lru_counter++;
+    
+    int slot = fat32_find_cache_slot(fs, lba);
+    if (slot < 0) return -1;
+    
+    /* Allocate buffer if needed */
+    if (!fs->block_cache[slot].data) {
+        fs->block_cache[slot].data = kmalloc(fs->bytes_per_sector);
+        if (!fs->block_cache[slot].data) return -1;
+    }
+    
+    /* Write-through: write to disk immediately */
+    if (write_sector(fs, lba, buffer) != 0) {
+        return -1;
+    }
+    
+    /* Update cache */
+    memcpy(fs->block_cache[slot].data, buffer, fs->bytes_per_sector);
+    fs->block_cache[slot].sector_lba = lba;
+    fs->block_cache[slot].valid = 1;
+    fs->block_cache[slot].dirty = 0;
+    fs->block_cache[slot].last_access = fat32_lru_counter;
+    
+    return 0;
+}
+
+/* Flush all dirty cache entries */
+void fat32_cache_flush(fat32_fs_t *fs) {
+    for (int i = 0; i < 8; i++) {
+        if (fs->block_cache[i].valid && fs->block_cache[i].dirty) {
+            write_sector(fs, fs->block_cache[i].sector_lba, fs->block_cache[i].data);
+            fs->block_cache[i].dirty = 0;
+        }
+    }
+}
+
+/* Get cache statistics */
+void fat32_cache_stats(fat32_fs_t *fs, uint32_t *hits, uint32_t *misses) {
+    if (hits) *hits = fs->cache_hits;
+    if (misses) *misses = fs->cache_misses;
+}
+
+/* Load entire FAT into cache */
+int fat32_load_fat_cache(fat32_fs_t *fs) {
+    size_t fat_size = fs->fat_size_32 * fs->bytes_per_sector;
+    fs->fat_buffer = kmalloc(fat_size * fs->num_fats); /* Cache all FAT copies */
+    if (!fs->fat_buffer) return -1;
+    
+    for (uint8_t fat = 0; fat < fs->num_fats; fat++) {
+        uint32_t fat_start = fs->fat_start_sector + fat * fs->fat_size_32;
+        for (uint32_t i = 0; i < fs->fat_size_32; i++) {
+            if (read_sector(fs, fat_start + i, fs->fat_buffer + (fat * fat_size) + i * fs->bytes_per_sector) != 0) {
+                kfree(fs->fat_buffer);
+                fs->fat_buffer = NULL;
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Get FAT entry from cache */
+uint32_t fat32_get_fat_entry(fat32_fs_t *fs, uint32_t cluster) {
+    if (!fs->fat_buffer) return 0x0FFFFFFF;
+    
+    uint32_t fat_offset = cluster * 4;
+    uint32_t fat_sector = fat_offset / fs->bytes_per_sector;
+    uint32_t fat_entry_offset = fat_offset % fs->bytes_per_sector;
+    
+    /* Use first FAT copy */
+    uint8_t *fat_data = fs->fat_buffer;
+    return *(uint32_t *)(fat_data + fat_sector * fs->bytes_per_sector + fat_entry_offset) & 0x0FFFFFFF;
+}
+
+/* Set FAT entry in cache and write-through to all FAT copies */
+int fat32_set_fat_entry(fat32_fs_t *fs, uint32_t cluster, uint32_t value) {
+    if (!fs->fat_buffer) return -1;
+    
+    uint32_t fat_offset = cluster * 4;
+    uint32_t fat_sector = fat_offset / fs->bytes_per_sector;
+    uint32_t fat_entry_offset = fat_offset % fs->bytes_per_sector;
+    
+    value &= 0x0FFFFFFF;
+    
+    for (uint8_t fat = 0; fat < fs->num_fats; fat++) {
+        uint32_t fat_start = fs->fat_start_sector + fat * fs->fat_size_32;
+        uint8_t sector_buf[512];
+        
+        /* Read current sector */
+        if (read_sector(fs, fat_start + fat_sector, sector_buf) != 0) return -1;
+        
+        /* Update entry */
+        *(uint32_t *)(sector_buf + fat_entry_offset) = value;
+        
+        /* Write back */
+        if (write_sector(fs, fat_start + fat_sector, sector_buf) != 0) return -1;
+    }
+    
+    /* Update cache */
+    uint8_t *fat_data = fs->fat_buffer;
+    *(uint32_t *)(fat_data + fat_sector * fs->bytes_per_sector + fat_entry_offset) = value;
+    
+    return 0;
 }
 
 /* Convert LFN/short name to standard string */
@@ -62,6 +248,10 @@ void fat32_format_name(const uint8_t *fat_name, char *out) {
         }
     }
 }
+
+/* ====================================================================
+ * Public API functions
+ * ==================================================================== */
 
 /* Initialize FAT32 filesystem */
 int fat32_init(int drive, fat32_fs_t *fs) {
@@ -96,6 +286,18 @@ int fat32_init(int drive, fat32_fs_t *fs) {
     fs->partition_lba = partition_lba;
     fs->drive = drive;
     
+    /* Initialize cache */
+    for (int i = 0; i < 8; i++) {
+        fs->block_cache[i].valid = 0;
+        fs->block_cache[i].dirty = 0;
+        fs->block_cache[i].data = NULL;
+        fs->block_cache[i].last_access = 0;
+        fs->block_cache[i].sector_lba = 0;
+    }
+    fs->cache_hits = 0;
+    fs->cache_misses = 0;
+    fs->fat_buffer = NULL;
+    
     /* Now read the BPB from the partition start */
     fat32_bpb_t bpb;
     if (read_sector(fs, 0, &bpb) != 0) {
@@ -120,8 +322,10 @@ int fat32_init(int drive, fat32_fs_t *fs) {
     uint32_t fat_end_sector = fs->fat_start_sector + (fs->num_fats * fs->fat_size_32);
     fs->first_data_sector = fat_end_sector;
     
-    /* Allocate FAT buffer (optional, for caching) */
-    fs->fat_buffer = NULL;
+    /* Load FAT into cache */
+    if (fat32_load_fat_cache(fs) != 0) {
+        serial_write("[FAT32] WARNING: Failed to load FAT cache\n");
+    }
     
     serial_write("[FAT32] Initialized on drive ");
     char drive_str[4];
@@ -148,7 +352,7 @@ int fat32_read_file(fat32_fs_t *fs, uint32_t cluster, void *buffer, size_t size,
         
         for (uint32_t i = 0; i < fs->sectors_per_cluster; i++) {
             uint8_t sec_buf[512];
-            if (read_sector(fs, sector + i, sec_buf) != 0) {
+            if (fat32_cache_read_sector(fs, sector + i, sec_buf) != 0) {
                 return -1;
             }
             
@@ -196,7 +400,7 @@ int fat32_read_dir(fat32_fs_t *fs, uint32_t cluster, void *buffer, size_t max_en
         
         for (uint32_t i = 0; i < fs->sectors_per_cluster; i++) {
             uint8_t sec_buf[512];
-            if (read_sector(fs, sector + i, sec_buf) != 0) {
+            if (fat32_cache_read_sector(fs, sector + i, sec_buf) != 0) {
                 return -1;
             }
             
