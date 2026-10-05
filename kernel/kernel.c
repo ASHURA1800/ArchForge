@@ -159,6 +159,7 @@ void kernel_main(void) {
 
     /* ---- Check for TEST mode EARLY ---- */
     bool test_mode = false;
+    bool net_test_mode = false;
     if (cmdline_request.response != NULL && cmdline_request.response->cmdline != NULL) {
         serial_write("[DEBUG] Cmdline: ");
         serial_write(cmdline_request.response->cmdline);
@@ -177,8 +178,19 @@ void kernel_main(void) {
             }
             p++;
         }
+        // Check for NET_TEST=1
+        if (strstr(cmdline, "NET_TEST=1") != NULL) {
+            net_test_mode = true;
+            serial_write("[KERNEL] NET_TEST mode detected.\n");
+        }
     } else {
         serial_write("[DEBUG] Cmdline is NULL\n");
+    }
+    if (net_test_mode) {
+        serial_write("[KERNEL] NET_TEST mode detected. Running network self-tests...\n");
+        net_selftest_n3();
+        serial_write("[KERNEL] Network self-tests complete.\n");
+        hcf();
     }
     if (test_mode) {
         gfx_test_g1();

@@ -39,18 +39,32 @@
 #define ATA_STATUS_OFFSET        0x07
 #define ATA_COMMAND_OFFSET       0x07
 
-/* ATA Commands */
-#define ATA_CMD_READ_SECTORS     0x20
-#define ATA_CMD_WRITE_SECTORS    0x30
-#define ATA_CMD_IDENTIFY         0xEC
-
-/* ATA Status bits */
-#define ATA_SR_BSY               0x80
-#define ATA_SR_DRQ               0x08
-#define ATA_SR_ERR               0x01
-
+/* Initialize ATA subsystem and identify all drives */
 void ata_init(void);
+
+/* Read sectors from drive (28-bit LBA)
+ * drive: 0-3 (Primary Master, Primary Slave, Secondary Master, Secondary Slave)
+ * lba: starting sector number
+ * buffer: output buffer (must be at least count * 512 bytes)
+ * count: number of sectors to read (1-255)
+ * Returns 0 on success, -1 on error (with retry logic) */
 int ata_read_sector(uint8_t drive, uint32_t lba, uint8_t *buffer, uint32_t count);
+
+/* Write sectors to drive (28-bit LBA)
+ * drive: 0-3
+ * lba: starting sector number
+ * buffer: input data
+ * count: number of sectors to write (1-255)
+ * Returns 0 on success, -1 on error (with retry logic) */
 int ata_write_sector(uint8_t drive, uint32_t lba, const uint8_t *buffer, uint32_t count);
+
+/* Flush drive's write cache to media
+ * Important for data integrity before shutdown/reboot */
+int ata_flush_cache(uint8_t drive);
+
+/* Query drive information */
+int ata_is_present(uint8_t drive);
+uint32_t ata_get_total_sectors(uint8_t drive);
+int ata_is_atapi(uint8_t drive);
 
 #endif /* ARCHFORGE_ATA_H */
