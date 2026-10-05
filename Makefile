@@ -9,6 +9,9 @@ LD = ld.lld
 CFLAGS = -target x86_64-elf -ffreestanding -fno-stack-protector -fno-pie -fno-pic \
          -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -mcmodel=kernel -Wall -Wextra -I./include -O2 \
          -MMD -MP
+ifeq ($(TEST),1)
+CFLAGS += -DTEST=1
+endif
 
 # Linker flags
 LDFLAGS = -nostdlib -T kernel/linker.ld -z max-page-size=0x1000
@@ -28,7 +31,11 @@ HDD_IMAGE = $(BUILD_DIR)/archforge.img
 # Limine deployment
 LIMINE_DIR = $(BUILD_DIR)/limine
 LIMINE_CFG = $(BOOT_DIR)/limine.conf
+LIMINE_CFG_NET = $(BOOT_DIR)/limine-net.conf
 LIMINE_URL = https://github.com/limine-bootloader/limine/releases/download/v12.6.1/limine-binary.tar.gz
+
+# Test configuration
+TEST = 0
 
 # QEMU settings
 QEMU = qemu-system-x86_64
@@ -94,7 +101,7 @@ $(KERNEL_ELF): $(BUILD_DIR)/start.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/serial.o 
                $(BUILD_DIR)/ramfs.o $(BUILD_DIR)/keyboard.o $(BUILD_DIR)/string.o $(BUILD_DIR)/stdlib.o \
                $(BUILD_DIR)/shell.o $(BUILD_DIR)/process.o $(BUILD_DIR)/switch.o \
                $(BUILD_DIR)/syscall.o $(BUILD_DIR)/syscall_entry.o $(BUILD_DIR)/msr.o \
-               $(BUILD_DIR)/elf.o $(BUILD_DIR)/fat32.o $(BUILD_DIR)/vfs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/pipe.o $(BUILD_DIR)/pci.o $(BUILD_DIR)/e1000.o $(BUILD_DIR)/gfx.o $(BUILD_DIR)/font.o \
+               $(BUILD_DIR)/elf.o $(BUILD_DIR)/fat32.o $(BUILD_DIR)/vfs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/pipe.o $(BUILD_DIR)/pci.o $(BUILD_DIR)/e1000.o $(BUILD_DIR)/gfx.o $(BUILD_DIR)/font.o $(BUILD_DIR)/net_selftest.o 
                $(BUILD_DIR)/user_hello.o $(BUILD_DIR)/user_cat.o $(BUILD_DIR)/user_init.o $(BUILD_DIR)/user_ls.o $(BUILD_DIR)/user_cp.o
 	@mkdir -p $(BUILD_DIR)
 	$(LD) $(LDFLAGS) -o $@ $^
@@ -117,8 +124,13 @@ $(ISO_DIR): $(KERNEL_ELF) $(LIMINE_DIR)/limine-bios.sys
 	@mkdir -p $(ISO_DIR)/EFI/BOOT
 	# Kernel + config at root AND in /boot/
 	cp $(KERNEL_ELF) $(ISO_DIR)/boot/kernel.elf
+ifeq ($(TEST),1)
+	cp $(LIMINE_CFG_NET) $(ISO_DIR)/limine.conf
+	cp $(LIMINE_CFG_NET) $(ISO_DIR)/boot/limine.conf
+else
 	cp $(LIMINE_CFG) $(ISO_DIR)/limine.conf
 	cp $(LIMINE_CFG) $(ISO_DIR)/boot/limine.conf
+endif
 	# Stage 2 loader under ALL known Limine BIOS search paths
 	cp $(LIMINE_DIR)/limine-bios.sys $(ISO_DIR)/boot/limine/limine-bios.sys
 	cp $(LIMINE_DIR)/limine-bios.sys $(ISO_DIR)/limine/limine-bios.sys

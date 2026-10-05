@@ -18,5 +18,6 @@ char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);
 size_t strspn(const char *s, const char *accept);
 size_t strcspn(const char *s, const char *reject);
+char *strstr(const char *haystack, const char *needle);
 
 #endif

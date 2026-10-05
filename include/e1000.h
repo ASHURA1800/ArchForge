@@ -30,6 +30,10 @@
 #define E1000_REG_MTA       0x5200  /* Multicast Table Array */
 #define E1000_REG_RAL       0x5400  /* Receive Address Low */
 #define E1000_REG_RAH       0x5404  /* Receive Address High */
+#define E1000_REG_RXC       0x4000  /* RX Counter */
+#define E1000_RAH_AV        (1 << 31) /* Address Valid */
+#define E1000_REG_IMC       0x00D8  /* Interrupt Mask Clear */
+#define E1000_REG_ICR       0x00C0  /* Interrupt Cause Read */
 
 /* CTRL Register Bits */
 #define E1000_CTRL_RST      (1 << 26) /* Device Reset */
@@ -37,12 +41,17 @@
 
 /* STATUS Register Bits */
 #define E1000_STATUS_LU     (1 << 1)  /* Link Up */
-
 /* RCTL Register Bits */
 #define E1000_RCTL_EN       (1 << 1)  /* Receiver Enable */
+#define E1000_RCTL_UPE      (1 << 3)  /* Unicast Promiscuous Enable */
 #define E1000_RCTL_BAM      (1 << 15) /* Broadcast Accept Mode */
-#define E1000_RCTL_SZ_2048  (3 << 16) /* Receive Buffer Size = 2048 */
+#define E1000_RCTL_SZ_2048  (0 << 16) /* Receive Buffer Size = 2048 */
+#define E1000_RCTL_SZ_1024  (1 << 16) /* Receive Buffer Size = 1024 */
+#define E1000_RCTL_SZ_512   (2 << 16) /* Receive Buffer Size = 512 */
+#define E1000_RCTL_SZ_256   (3 << 16) /* Receive Buffer Size = 256 */
 #define E1000_RCTL_SECRC    (1 << 26) /* Strip Ethernet CRC */
+#define E1000_RCTL_UPE      (1 << 3)  /* Unicast Promiscuous Enable */
+#define E1000_RCTL_EXT      (1 << 30) /* Extended Receive Descriptor (16->32 byte) */
 
 /* TCTL Register Bits */
 #define E1000_TCTL_EN       (1 << 1)  /* Transmit Enable */
@@ -90,6 +99,7 @@ typedef struct {
     uint64_t *tx_buffer_phys;
     uint16_t tx_ring_size;
     uint16_t tx_cur;
+    uint16_t rx_cur;
 } e1000_dev_t;
 
 extern e1000_dev_t e1000_dev;
@@ -97,5 +107,6 @@ extern e1000_dev_t e1000_dev;
 void e1000_init(uint8_t bus, uint8_t slot, uint8_t func);
 void e1000_read_mac(void);
 int e1000_transmit(uint8_t *data, uint16_t len);
+int e1000_poll_rx(void);
 
 #endif // E1000_H

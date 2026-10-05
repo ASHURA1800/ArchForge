@@ -26,6 +26,8 @@
 #include "pipe.h"
 #include "pci.h"
 #include "fat32.h"
+#include "e1000.h"
+#include "net_selftest.h"
 #include "string.h"
 
 /* Forward declaration for G1 test function */
@@ -53,6 +55,13 @@ static volatile struct limine_hhdm_request hhdm_request = {
 __attribute__((used, section(".limine_requests")))
 volatile struct limine_framebuffer_request framebuffer_request = {
     .id = LIMINE_FRAMEBUFFER_REQUEST_ID,
+    .revision = 0
+};
+
+/* Executable command line — for TEST=1 detection */
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_executable_cmdline_request cmdline_request = {
+    .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
     .revision = 0
 };
 
@@ -278,6 +287,16 @@ void kernel_main(void) {
     serial_write("[KERNEL] Initializing ATA PIO driver...\n");
     ata_init();
     pci_scan();
+
+    /* ---- Network Self-Test (if TEST=1) ---- */
+    if (cmdline_request.response != NULL && cmdline_request.response->cmdline != NULL) {
+        if (strstr(cmdline_request.response->cmdline, "TEST=1") != NULL) {
+            serial_write("[KERNEL] TEST=1 detected. Running network self-tests...\n");
+            net_selftest_n3();
+            serial_write("[KERNEL] Network self-tests complete.\n");
+        }
+    }
+
     
     /* ---- Step 11c: Initialize FAT32 Filesystem ---- */
     serial_write("[KERNEL] Initializing FAT32 filesystem...\n");
