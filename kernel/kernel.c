@@ -329,6 +329,38 @@ void kernel_main(void) {
             } else {
                 serial_write("[FAT32] No directory entries found or error\n");
             }
+            
+            /* ---- A11: Persistence Test ---- */
+            serial_write("[PERSIST] Running persistence test...\n");
+            const char *test_data = "ArchForge Persistence Test Data 1234567890";
+            size_t test_len = 44; /* Length of test_data */
+            char read_buf[64];
+            
+            /* Try to read the test file */
+            int bytes_read = fat32_read_path(fs, "persist.dat", read_buf, sizeof(read_buf) - 1);
+            if (bytes_read > 0) {
+                /* File exists - verify data */
+                read_buf[bytes_read] = '\0';
+                if (bytes_read == (int)test_len && memcmp(read_buf, test_data, test_len) == 0) {
+                    serial_write("[PERSIST] PASS: Data verified from previous boot\n");
+                } else {
+                    serial_write("[PERSIST] FAIL: Data mismatch\n");
+                    serial_write("[PERSIST] Expected: ");
+                    serial_write(test_data);
+                    serial_write("\n");
+                    serial_write("[PERSIST] Got: ");
+                    serial_write(read_buf);
+                    serial_write("\n");
+                }
+            } else {
+                /* File doesn't exist - create it */
+                if (fat32_write_path(fs, "persist.dat", test_data, test_len) >= 0) {
+                    serial_write("[PERSIST] Created persist.dat (verify on next boot)\n");
+                    fat32_sync();
+                } else {
+                    serial_write("[PERSIST] FAIL: Could not create persist.dat\n");
+                }
+            }
         }
     } else {
         serial_write("[KERNEL] WARNING: FAT32 initialization failed (no FAT32 drive found).\n");

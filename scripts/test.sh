@@ -98,12 +98,52 @@ case "$1" in
             || true
        
         # Check both boots
-        if grep -q "Welcome to ArchForge OS" "$BUILD_DIR/serial1.log" && \
-           grep -q "Welcome to ArchForge OS" "$BUILD_DIR/serial2.log"; then
+        echo "=== Analyzing results ==="
+        
+        BOOT1_OK=0
+        BOOT2_OK=0
+        PERSIST_PASS=0
+        
+        if grep -q "Welcome to ArchForge OS" "$BUILD_DIR/serial1.log"; then
+            BOOT1_OK=1
+            echo "✅ Boot 1: Kernel started"
+        else
+            echo "❌ Boot 1: Kernel did not start"
+        fi
+        
+        if grep -q "\[PERSIST\] Created persist.dat" "$BUILD_DIR/serial1.log"; then
+            echo "✅ Boot 1: persist.dat created"
+        else
+            echo "⚠️  Boot 1: persist.dat creation not found"
+        fi
+        
+        if grep -q "Welcome to ArchForge OS" "$BUILD_DIR/serial2.log"; then
+            BOOT2_OK=1
+            echo "✅ Boot 2: Kernel started"
+        else
+            echo "❌ Boot 2: Kernel did not start"
+        fi
+        
+        if grep -q "\[PERSIST\] PASS" "$BUILD_DIR/serial2.log"; then
+            PERSIST_PASS=1
+            echo "✅ Boot 2: Persistence verified!"
+        elif grep -q "\[PERSIST\] FAIL" "$BUILD_DIR/serial2.log"; then
+            echo "❌ Boot 2: Persistence FAILED (data mismatch)"
+        else
+            echo "⚠️  Boot 2: No persistence result found"
+        fi
+        
+        if [ "$BOOT1_OK" -eq 1 ] && [ "$BOOT2_OK" -eq 1 ] && [ "$PERSIST_PASS" -eq 1 ]; then
+            echo ""
             echo "✅ PERSISTENCE TEST PASSED"
             exit 0
         else
+            echo ""
             echo "❌ PERSISTENCE TEST FAILED"
+            echo "=== Boot 1 serial (last 30 lines) ==="
+            tail -30 "$BUILD_DIR/serial1.log"
+            echo "=== Boot 2 serial (last 30 lines) ==="
+            tail -30 "$BUILD_DIR/serial2.log"
             exit 1
         fi
         ;;
