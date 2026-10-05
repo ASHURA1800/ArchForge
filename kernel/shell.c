@@ -13,6 +13,7 @@
 #include "ramfs.h"
 #include "heap.h"
 #include "syscall.h"
+#include "fat32.h"
 #include "../include/string.h"
 #include "../include/stdlib.h"
 
@@ -31,6 +32,9 @@ typedef struct {
 /* Command table */
 static shell_command_t commands[64];
 static size_t num_commands = 0;
+
+/* Forward declarations */
+static void register_builtins(void);
 
 /* Command history */
 static char history[SHELL_HISTORY_SIZE][SHELL_MAX_LINE];
@@ -52,6 +56,7 @@ void shell_init(void) {
     history_pos = 0;
     line_len = 0;
     cursor_pos = 0;
+    register_builtins();
     serial_write("[SHELL] Shell initialized.\n");
 }
 
@@ -544,9 +549,37 @@ int cmd_meminfo(int argc, char *argv[]) {
     return 0;
 }
 
+/* Callback for ls command */
+static void cmd_ls_callback(const char *name, uint32_t size, uint8_t attr, void *ctx) {
+    (void)ctx;
+    if (attr & FAT32_ATTR_DIRECTORY) {
+        console_write("[DIR] ");
+    } else {
+        console_write("      ");
+    }
+    console_write(name);
+    console_write(" (");
+    console_write_dec(size);
+    console_write(" bytes)\n");
+}
+
 int cmd_ls(int argc, char *argv[]) {
-    extern void ramfs_list(void);
-    ramfs_list();
+    if (!fat32_is_mounted()) {
+        console_write("FAT32 not mounted\n");
+        return -1;
+    }
+    
+    const char *path = (argc > 1) ? argv[1] : "/";
+    
+    fat32_fs_t *fs = fat32_get_fs();
+    int count = fat32_list_dir_path(fs, path, cmd_ls_callback, NULL);
+    if (count < 0) {
+        console_write("ls: cannot access '");
+        console_write(path);
+        console_write("'\n");
+        return -1;
+    }
+    
     return 0;
 }
 
@@ -556,15 +589,33 @@ int cmd_cat(int argc, char *argv[]) {
         return -1;
     }
     
-    extern int ramfs_read(const char *path, void *buf, size_t size);
-    extern int ramfs_stat(const char *path, size_t *size_out);
+    if (!fat32_is_mounted()) {
+        console_write("FAT32 not mounted\n");
+        return -1;
+    }
     
-    size_t size;
-    if (ramfs_stat(argv[1], &size) != 0) {
+    fat32_fs_t *fs = fat32_get_fs();
+    
+    /* First, find the file to get its size */
+    fat32_dir_entry_t entry;
+    if (fat32_resolve_path(fs, argv[1], &entry, NULL) != 0) {
         console_write("File not found: ");
         console_write(argv[1]);
         console_write("\n");
         return -1;
+    }
+    
+    if (entry.attr & FAT32_ATTR_DIRECTORY) {
+        console_write("cat: '");
+        console_write(argv[1]);
+        console_write("': Is a directory\n");
+        return -1;
+    }
+    
+    size_t size = entry.file_size;
+    if (size == 0) {
+        console_write("(empty file)\n");
+        return 0;
     }
     
     char *buf = kmalloc(size + 1);
@@ -573,13 +624,14 @@ int cmd_cat(int argc, char *argv[]) {
         return -1;
     }
     
-    if (ramfs_read(argv[1], buf, size) < 0) {
+    int bytes_read = fat32_read_path(fs, argv[1], buf, size);
+    if (bytes_read < 0) {
         console_write("Read error\n");
         kfree(buf);
         return -1;
     }
     
-    buf[size] = '\0';
+    buf[bytes_read] = '\0';
     console_write(buf);
     console_write("\n");
     kfree(buf);
@@ -589,6 +641,11 @@ int cmd_cat(int argc, char *argv[]) {
 int cmd_write(int argc, char *argv[]) {
     if (argc < 3) {
         console_write("Usage: write <file> <content>\n");
+        return -1;
+    }
+    
+    if (!fat32_is_mounted()) {
+        console_write("FAT32 not mounted\n");
         return -1;
     }
     
@@ -610,8 +667,9 @@ int cmd_write(int argc, char *argv[]) {
         if (i < argc - 1) strcat(content, " ");
     }
     
-    extern int ramfs_write(const char *path, const void *data, size_t size);
-    if (ramfs_write(argv[1], content, strlen(content)) < 0) {
+    fat32_fs_t *fs = fat32_get_fs();
+    int result = fat32_write_path(fs, argv[1], content, strlen(content));
+    if (result < 0) {
         console_write("Write failed\n");
         kfree(content);
         return -1;
@@ -632,9 +690,16 @@ int cmd_rm(int argc, char *argv[]) {
         return -1;
     }
     
-    extern int ramfs_delete(const char *path);
-    if (ramfs_delete(argv[1]) < 0) {
-        console_write("Delete failed\n");
+    if (!fat32_is_mounted()) {
+        console_write("FAT32 not mounted\n");
+        return -1;
+    }
+    
+    fat32_fs_t *fs = fat32_get_fs();
+    if (fat32_delete_path(fs, argv[1]) < 0) {
+        console_write("Delete failed: ");
+        console_write(argv[1]);
+        console_write("\n");
         return -1;
     }
     
@@ -645,7 +710,27 @@ int cmd_rm(int argc, char *argv[]) {
 }
 
 int cmd_mkdir(int argc, char *argv[]) {
-    console_write("mkdir: Not implemented yet\n");
+    if (argc < 2) {
+        console_write("Usage: mkdir <directory>\n");
+        return -1;
+    }
+    
+    if (!fat32_is_mounted()) {
+        console_write("FAT32 not mounted\n");
+        return -1;
+    }
+    
+    fat32_fs_t *fs = fat32_get_fs();
+    if (fat32_mkdir_path(fs, argv[1]) < 0) {
+        console_write("mkdir: failed to create '");
+        console_write(argv[1]);
+        console_write("'\n");
+        return -1;
+    }
+    
+    console_write("Created directory: ");
+    console_write(argv[1]);
+    console_write("\n");
     return 0;
 }
 
@@ -786,6 +871,19 @@ void shell_run(void) {
     }
 }
 
+/* Sync command - flush all caches to disk */
+int cmd_sync(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
+    if (!fat32_is_mounted()) {
+        console_write("FAT32 not mounted\n");
+        return -1;
+    }
+    fat32_sync();
+    console_write("Filesystem synced.\n");
+    return 0;
+}
+
 /* ====================================================================
  * Register all built-in commands
  * ==================================================================== */
@@ -796,15 +894,16 @@ static void register_builtins(void) {
     shell_register_command("reboot", cmd_reboot, "Reboot system");
     shell_register_command("shutdown", cmd_shutdown, "Shutdown system");
     shell_register_command("meminfo", cmd_meminfo, "Show memory info");
-    shell_register_command("ls", cmd_ls, "List files in RAMFS");
-    shell_register_command("cat", cmd_cat, "Display file contents");
-    shell_register_command("write", cmd_write, "Write to file");
-    shell_register_command("rm", cmd_rm, "Delete file");
-    shell_register_command("mkdir", cmd_mkdir, "Create directory (stub)");
+    shell_register_command("ls", cmd_ls, "List files [path] (FAT32)");
+    shell_register_command("cat", cmd_cat, "Display file contents (FAT32)");
+    shell_register_command("write", cmd_write, "Write to file (FAT32)");
+    shell_register_command("rm", cmd_rm, "Delete file (FAT32)");
+    shell_register_command("mkdir", cmd_mkdir, "Create directory (FAT32)");
     shell_register_command("cd", cmd_cd, "Change directory (stub)");
     shell_register_command("pwd", cmd_pwd, "Print working directory");
     shell_register_command("history", cmd_history, "Show command history");
     shell_register_command("version", cmd_version, "Show OS version");
     shell_register_command("uptime", cmd_uptime, "Show system uptime");
     shell_register_command("exec", cmd_exec, "Execute ELF program from RAMFS");
+    shell_register_command("sync", cmd_sync, "Flush filesystem caches to disk");
 }

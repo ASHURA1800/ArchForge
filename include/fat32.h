@@ -259,4 +259,21 @@ int fat32_mkdir_path(fat32_fs_t *fs, const char *path);
 typedef void (*fat32_list_callback_t)(const char *name, uint32_t size, uint8_t attr, void *ctx);
 int fat32_list_dir_path(fat32_fs_t *fs, const char *path, fat32_list_callback_t callback, void *ctx);
 
+/* ====================================================================
+ * Global filesystem instance (A9: VFS integration)
+ * ==================================================================== */
+
+/* Mount the first available FAT32 partition (scans all drives)
+ * Returns 0 on success, -1 if no FAT32 partition found */
+int fat32_mount(void);
+
+/* Get the global filesystem instance (NULL if not mounted) */
+fat32_fs_t *fat32_get_fs(void);
+
+/* Check if FAT32 is mounted */
+int fat32_is_mounted(void);
+
+/* Flush all caches to disk (important before shutdown) */
+void fat32_sync(void);
+
 #endif

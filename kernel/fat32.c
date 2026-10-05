@@ -1465,3 +1465,53 @@ int fat32_list_dir_path(fat32_fs_t *fs, const char *path, fat32_list_callback_t 
     
     return count;
 }
+
+
+/* ====================================================================
+ * Global filesystem instance (A9: VFS integration)
+ * ==================================================================== */
+
+static fat32_fs_t g_fat32_fs;
+static int g_fat32_mounted = 0;
+
+int fat32_mount(void) {
+    if (g_fat32_mounted) return 0; /* Already mounted */
+    
+    /* Scan all 4 drives for FAT32 partitions */
+    for (int drive = 0; drive <= 3; drive++) {
+        if (fat32_init(drive, &g_fat32_fs) == 0) {
+            g_fat32_mounted = 1;
+            serial_write("[FAT32] Mounted successfully on drive ");
+            char drive_str[2];
+            drive_str[0] = '0' + drive;
+            drive_str[1] = '\0';
+            serial_write(drive_str);
+            serial_write("\n");
+            return 0;
+        }
+    }
+    
+    serial_write("[FAT32] No FAT32 partition found on any drive\n");
+    return -1;
+}
+
+fat32_fs_t *fat32_get_fs(void) {
+    if (!g_fat32_mounted) return NULL;
+    return &g_fat32_fs;
+}
+
+int fat32_is_mounted(void) {
+    return g_fat32_mounted;
+}
+
+void fat32_sync(void) {
+    if (!g_fat32_mounted) return;
+    
+    /* Flush block cache */
+    fat32_cache_flush(&g_fat32_fs);
+    
+    /* Flush ATA drive cache */
+    ata_flush_cache(g_fat32_fs.drive);
+    
+    serial_write("[FAT32] Synced all caches to disk\n");
+}

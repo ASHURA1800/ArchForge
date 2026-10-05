@@ -44,7 +44,7 @@ echo "✅ Build successful."
 # trap "kill $HOST_PID 2>/dev/null" EXIT
 
 echo "[2/4] Starting QEMU with e1000 NIC and slirp..."
-timeout 30 qemu-system-x86_64 \
+timeout 90 qemu-system-x86_64 \
     -M pc -m 512M -display none -no-reboot -no-shutdown \
     -serial file:"$SERIAL_LOG" \
     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
