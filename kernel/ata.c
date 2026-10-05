@@ -360,11 +360,22 @@ void ata_init(void) {
         if (ata_identify(i) == 0) {
             serial_write("[ATA] Drive ");
             serial_write_dec(i);
-            serial_write(": ready\n");
+            serial_write(": ready (IDENTIFY OK)\n");
         } else {
-            serial_write("[ATA] Drive ");
-            serial_write_dec(i);
-            serial_write(": not present or not ATA\n");
+            /* IDENTIFY failed - try fallback detection */
+            uint16_t base = ata_get_base(i);
+            uint8_t status = inb(base + ATA_STATUS_OFFSET);
+            if (status != 0 && status != 0xFF) {
+                /* Drive responds to status read - mark as present */
+                ata_drives[i].present = 1;
+                serial_write("[ATA] Drive ");
+                serial_write_dec(i);
+                serial_write(": present (fallback detection, no IDENTIFY)\n");
+            } else {
+                serial_write("[ATA] Drive ");
+                serial_write_dec(i);
+                serial_write(": not present\n");
+            }
         }
     }
     

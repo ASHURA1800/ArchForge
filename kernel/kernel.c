@@ -187,12 +187,9 @@ void kernel_main(void) {
         serial_write("[DEBUG] Cmdline is NULL\n");
     }
     if (net_test_mode) {
-        serial_write("[KERNEL] NET_TEST mode detected. Running network self-tests...\n");
-        net_selftest_n3();
-        serial_write("[KERNEL] Network self-tests complete.\n");
-        hcf();
+        serial_write("[KERNEL] NET_TEST mode detected. Will run network self-tests after subsystem init.\n");
     }
-    if (test_mode) {
+    if (test_mode && !net_test_mode) {
         gfx_test_g1();
         hcf();
     }
@@ -298,6 +295,11 @@ void kernel_main(void) {
     if (cmdline_request.response != NULL && cmdline_request.response->cmdline != NULL) {
         if (strstr(cmdline_request.response->cmdline, "TEST=1") != NULL) {
             serial_write("[KERNEL] TEST=1 detected. Running network self-tests...\n");
+            net_selftest_n3();
+            serial_write("[KERNEL] Network self-tests complete.\n");
+        }
+        if (strstr(cmdline_request.response->cmdline, "NET_TEST=1") != NULL) {
+            serial_write("[KERNEL] NET_TEST=1 detected. Running network self-tests...\n");
             net_selftest_n3();
             serial_write("[KERNEL] Network self-tests complete.\n");
         }

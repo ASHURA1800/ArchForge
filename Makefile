@@ -144,7 +144,7 @@ endif
 	cp $(LIMINE_DIR)/limine-uefi-cd.bin  $(ISO_DIR)/boot/limine-uefi-cd.bin
 	cp $(LIMINE_DIR)/BOOTX64.EFI         $(ISO_DIR)/EFI/BOOT/BOOTX64.EFI
 
-$(ISO_IMAGE): $(ISO_DIR)
+$(ISO_IMAGE): $(ISO_DIR) $(LIMINE_CFG_NET) $(LIMINE_CFG)
 	@echo "Building bootable ISO..."
 	xorriso -as mkisofs -R -r -J -hfsplus -apm-block-size 2048 -b boot/limine-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -159,17 +159,21 @@ $(ISO_IMAGE): $(ISO_DIR)
 	fi
 	@echo "ISO built successfully: $(ISO_IMAGE)"
 
-# ---- HDD image (no-sudo version using mtools) ----
+# ---- HDD image (MBR-partitioned, no-sudo version using mtools) ----
 
 $(HDD_IMAGE): $(KERNEL_ELF)
-	@echo "Building HDD image (no-sudo)..."
+	@echo "Building HDD image (MBR-partitioned, no-sudo)..."
 	@rm -f $(HDD_IMAGE)
 	# Create a 64MB raw disk image
 	dd if=/dev/zero of=$(HDD_IMAGE) bs=1M count=64 status=none
-	# Format entire disk as FAT32 (superfloppy - no partition table)
-	mkfs.fat -F 32 $(HDD_IMAGE)
-	# Create mtools config for this image (no partition, no offset)
-	@echo "drive c: file=\"$(HDD_IMAGE)\"" > $(BUILD_DIR)/mtools.conf
+	# Partition with single FAT32 partition (2048 sector offset = 1MiB)
+	parted -s $(HDD_IMAGE) mklabel msdos
+	parted -s $(HDD_IMAGE) mkpart primary fat32 1MiB 100%
+	parted -s $(HDD_IMAGE) set 1 boot on
+	# Format FAT32 on partition using mkfs.fat with offset
+	mkfs.fat -F 32 --offset 2048 $(HDD_IMAGE)
+	# Create mtools config for this image (partition=1)
+	@echo "drive c: file=\"$(HDD_IMAGE)\" partition=1" > $(BUILD_DIR)/mtools.conf
 	# Copy kernel and limine files using mtools
 	MTOOLSRC=$(BUILD_DIR)/mtools.conf mmd c:/boot c:/boot/limine
 	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(KERNEL_ELF) c:/boot/kernel.elf
@@ -178,11 +182,11 @@ $(HDD_IMAGE): $(KERNEL_ELF)
 	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(LIMINE_DIR)/limine-bios.sys c:/boot/limine/limine-bios.sys
 	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(LIMINE_DIR)/limine-bios.sys c:/limine-bios.sys
 	MTOOLSRC=$(BUILD_DIR)/mtools.conf mcopy $(LIMINE_DIR)/limine-bios.sys c:/limine.sys
-	# Deploy Limine to MBR with --force
+	# Deploy Limine to MBR
 	@if [ -f "$(LIMINE_DIR)/bin/limine-deploy" ]; then \
-		$(LIMINE_DIR)/bin/limine-deploy bios-install --force $(HDD_IMAGE); \
+		$(LIMINE_DIR)/bin/limine-deploy bios-install $(HDD_IMAGE); \
 	elif command -v limine-deploy >/dev/null 2>&1; then \
-		limine-deploy bios-install --force $(HDD_IMAGE); \
+		limine-deploy bios-install $(HDD_IMAGE); \
 	fi
 	@echo "HDD image built successfully: $(HDD_IMAGE)"
 
