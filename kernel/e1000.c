@@ -181,6 +181,11 @@ void e1000_init(uint8_t bus, uint8_t slot, uint8_t func) {
             /* Clear bit 30 (Extended Receive Descriptor) - 82540EM only supports legacy 16-byte descriptors */
                     rctl &= ~E1000_RCTL_EXT;
             rctl |= E1000_RCTL_EN | E1000_RCTL_BAM | E1000_RCTL_SZ_2048 | E1000_RCTL_SECRC | E1000_RCTL_UPE;
+    serial_write("[E1000] poll_rx: RDT=");
+    serial_write_dec(rdt);
+    serial_write(" RDH=");
+    serial_write_dec(rdh);
+    serial_write("\n");
             // Also enable MPE (Multicast Promiscuous Enable), VPE (VLAN Promiscuous Enable) and SBP (Store Bad Packets)
             rctl |= (1 << 4) | (1 << 2) | (1 << 1);  // MPE | SBP | VPE
             // Enable UPE (Unicast Promiscuous Enable) - bit 3, critical for receiving packets not matching our MAC

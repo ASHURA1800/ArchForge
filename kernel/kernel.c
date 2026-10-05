@@ -72,12 +72,6 @@ volatile struct limine_memmap_request memmap_request = {
     .revision = 0
 };
 
-/* Executable cmdline — for test mode detection */
-__attribute__((used, section(".limine_requests")))
-static volatile struct limine_executable_cmdline_request cmdline_request = {
-    .id = LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID,
-    .revision = 0
-};
 
 /* Request markers — Limine uses these to find the requests section */
 __attribute__((used, section(".limine_requests_start")))
